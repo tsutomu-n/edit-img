@@ -1,11 +1,12 @@
 [project]
 name = "edit-img"
 version = "0.1.0"
-description = "Add your description here"
+description = "日本語対応の画像リサイズ・圧縮ツール"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "loguru>=0.7.3",
     "pillow>=9.0.0",
     "tqdm>=4.60.0",
+    "TkEasyGUI>=0.2.80",
 ]
