@@ -10,12 +10,127 @@ TkEasyGUIを使ったグラフィカルインターフェースで
 
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 import TkEasyGUI as eg
 
 # コア機能をインポート
 import resize_core as core
+
+# グローバル変数
+cancel_process = False  # 処理キャンセルフラグ
+
+def process_images_thread(values, window):
+    """
+    別スレッドで実行する画像処理関数
+    """
+    global cancel_process
+    cancel_process = False
+    
+    source_dir = Path(values['source'])
+    dest_dir = Path(values['dest'])
+    width = int(values['width'])
+    quality = int(values['quality'])
+    
+    # 画像ファイルを検索
+    try:
+        window['status'].update("画像ファイルを検索中...")
+        image_files = core.find_image_files(source_dir)
+        
+        if not image_files:
+            window['status'].update("画像ファイルが見つかりませんでした")
+            window['btn_start'].update(disabled=False)
+            window['btn_cancel'].update(disabled=True)
+            return
+            
+        # プログレスバーの設定
+        window['progress'].update(0, max=len(image_files))
+        window['status'].update(f"処理開始: 合計 {len(image_files)} ファイル")
+        
+        # 処理結果の統計
+        processed = 0
+        errors = 0
+        skipped = 0
+        total_size_before = 0
+        total_size_after = 0
+        
+        # 各画像を処理
+        for idx, img_path in enumerate(image_files):
+            if cancel_process:
+                window['status'].update("処理がキャンセルされました")
+                break
+                
+            try:
+                # 出力先パスを取得
+                dest_path = core.get_destination_path(img_path, source_dir, dest_dir)
+                
+                # 処理状況を表示
+                file_name = img_path.name
+                window['current_file'].update(f"{idx+1}/{len(image_files)}: {file_name}")
+                
+                # ファイルサイズを取得
+                file_size_before = img_path.stat().st_size
+                total_size_before += file_size_before
+                
+                # 画像処理実行
+                result = core.resize_and_compress_image(
+                    img_path, dest_path, width, quality, False
+                )
+                
+                if result[0]:  # 処理成功
+                    processed += 1
+                    # 処理後のファイルサイズを取得
+                    if dest_path.exists():
+                        file_size_after = dest_path.stat().st_size
+                        total_size_after += file_size_after
+                        reduction = ((file_size_before - file_size_after) / file_size_before * 100)
+                        window['status'].update(
+                            f"処理: {core.format_file_size(file_size_before)} → "
+                            f"{core.format_file_size(file_size_after)} ({reduction:.1f}% 削減)"
+                        )
+                else:
+                    errors += 1
+                    window['status'].update(f"エラー: 画像処理に失敗しました")
+                    
+            except Exception as e:
+                window['status'].update(f"エラー: {str(e)}")
+                errors += 1
+                
+            # 進捗更新
+            window['progress'].update(idx + 1)
+            # GUI応答性維持のための短い待機
+            time.sleep(0.01)
+            
+        # 処理完了
+        if not cancel_process:
+            reduction_rate = 0
+            if total_size_before > 0:
+                reduction_rate = ((total_size_before - total_size_after) / total_size_before * 100)
+                
+            window['status'].update(
+                f"完了！ 成功: {processed}、エラー: {errors}、合計削減率: {reduction_rate:.1f}%"
+            )
+            
+            # 結果ダイアログ表示
+            eg.popup(
+                f"処理完了!\n\n"
+                f"処理ファイル数: {processed}\n"
+                f"エラー数: {errors}\n"
+                f"元のサイズ: {core.format_file_size(total_size_before)}\n"
+                f"処理後サイズ: {core.format_file_size(total_size_after)}\n"
+                f"削減率: {reduction_rate:.1f}%",
+                title="処理結果"
+            )
+    except Exception as e:
+        window['status'].update(f"予期せぬエラー: {str(e)}")
+        
+    finally:
+        # UI状態を元に戻す
+        window['btn_start'].update(disabled=False)
+        window['btn_cancel'].update(disabled=True)
+
 
 def main():
     """
@@ -44,8 +159,11 @@ def main():
         [eg.Text('JPEG品質', size=(12, 1)), 
          eg.Slider(range=(30, 100), default_value=settings['quality'], 
                   orientation='h', size=(40, 15), key='quality')],
-        [eg.Text('', key='status')],
+        [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
+        [eg.ProgressBar(100, orientation='h', size=(54, 20), key='progress')],
+        [eg.Text('準備完了', key='status')],
         [eg.Button('実行', key='btn_start'), 
+         eg.Button('キャンセル', key='btn_cancel', disabled=True), 
          eg.Button('終了')]
     ]
     
@@ -54,7 +172,7 @@ def main():
     
     # イベントループ
     while True:
-        event, values = window.read()
+        event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
         
         if event in (eg.WINDOW_CLOSED, '終了'):
             break
@@ -79,9 +197,22 @@ def main():
                 else:
                     continue
                     
-            # パラメータ表示
-            window['status'].update(f"幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
-            eg.popup(f"処理を開始します\n\n入力: {source_dir}\n出力: {dest_dir}\n幅: {int(values['width'])}px\n品質: {int(values['quality'])}%")
+            # UI状態更新
+            window['btn_start'].update(disabled=True)
+            window['btn_cancel'].update(disabled=False)
+            window['status'].update(f"処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
+            
+            # 別スレッドで処理実行
+            threading.Thread(
+                target=process_images_thread,
+                args=(values, window),
+                daemon=True
+            ).start()
+            
+        elif event == 'btn_cancel':
+            global cancel_process
+            cancel_process = True
+            window['status'].update("キャンセル中...")
     
     window.close()
 
