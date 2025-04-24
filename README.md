@@ -33,19 +33,6 @@
 [uv](https://github.com/astral-sh/uv) は高速なPythonパッケージマネージャーです。まずはuvをインストールしてください。
 
 ```bash
-# uvのインストール
-# 方法は https://github.com/astral-sh/uv を参照
-
-# 介介環境の作成と有効化
-uv venv
-source .venv/bin/activate  # Linux/macOS
-# または
-.venv\Scripts\activate  # Windows
-
-# パッケージのインストール
-uv pip install -e .
-```
-```bash
 # リポジトリのクローン
 git clone https://github.com/tsutomu-n/edit-img.git
 cd edit-img
