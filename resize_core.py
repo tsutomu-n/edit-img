@@ -361,8 +361,33 @@ def sanitize_filename(filename):
         str: 安全なファイル名
     """
     try:
+        # emojiパッケージのインポート（必要な場合のみ実行）
+        try:
+            import emoji
+            has_emoji_lib = True
+        except ImportError:
+            has_emoji_lib = False
+            logger.warning("emojiパッケージがインストールされていません。通常の絵文字処理を使用します。")
+        
         # 文字列に変換
         safe_name = str(filename)
+        original_name = safe_name
+        
+        # 絵文字を処理する
+        if has_emoji_lib:
+            # emojiパッケージを使用して絵文字をテキスト表現に変換
+            try:
+                # 絵文字が含まれているかチェック
+                if emoji.emoji_count(safe_name) > 0:
+                    # 絵文字をテキスト表現に変換 (:smile: などに変換)
+                    demojized = emoji.demojize(safe_name)
+                    
+                    # コロンをアンダースコアに変換し、ファイル名に適した形式にする
+                    import re
+                    safe_name = re.sub(r':(\w+):', r'_\1_', demojized)
+                    logger.debug(f"絵文字を変換: '{original_name}' -> '{safe_name}'")
+            except Exception as emoji_err:
+                logger.warning(f"絵文字処理中にエラーが発生しました: {emoji_err}")
         
         # Windows禁止文字をアンダースコアに置換
         unsafe_chars = '<>:"/\\|?*\0'
@@ -371,6 +396,34 @@ def sanitize_filename(filename):
         
         # コントロール文字をアンダースコアに置換
         safe_name = ''.join(c if ord(c) >= 32 else '_' for c in safe_name)
+        
+        # 絵文字パッケージが使えない場合のバックアップ処理
+        if not has_emoji_lib and emoji.emoji_count(original_name) > 0:
+            # unicodedataを使用した代替絵文字処理
+            import unicodedata
+            import re
+            
+            # ASCII文字と一部の一般的な非ASCII文字を許可
+            # 日本語は正規表現でマッチしないようにし、そのまま残す
+            ascii_and_safe = re.compile(r'[a-zA-Z0-9\-_. \[\]()\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+')
+            
+            def replace_unsafe_char(c):
+                # 日本語など一般的な文字はそのまま使用
+                if ascii_and_safe.fullmatch(c):
+                    return c
+                # 絵文字やアクセント記号などは名前に変換
+                try:
+                    emoji_name = unicodedata.name(c).lower()
+                    # 絵文字などは短い説明的な名前に変換
+                    if 'emoji' in emoji_name:
+                        return f'_{emoji_name.split()[-1][:8]}_'
+                    # その他の特殊文字は単純なアンダースコアに
+                    return '_'
+                except Exception:
+                    return '_'
+            
+            # 安全でないUnicode文字を処理
+            safe_name = ''.join(replace_unsafe_char(c) for c in safe_name)
         
         # Windowsの予約語をチェック
         reserved_names = ["CON", "PRN", "AUX", "NUL",
@@ -392,6 +445,10 @@ def sanitize_filename(filename):
         # 空の場合はデフォルト名
         if not base_name:
             base_name = "unnamed_file"
+        
+        # ダブルアンダースコアをシングルに置換して可読性を高める
+        import re
+        base_name = re.sub(r'_+', '_', base_name)
         
         # ファイル名が長すぎる場合は切り詰め
         if len(base_name) > 200:  # Windowsの制限より少なく
