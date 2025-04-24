@@ -31,7 +31,7 @@
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/edit-img.git
+git clone https://github.com/tsutomu-n/edit-img.git
 cd edit-img
 
 # 仮想環境の作成
@@ -51,7 +51,7 @@ uv sync
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/edit-img.git
+git clone https://github.com/tsutomu-n/edit-img.git
 cd edit-img
 
 # 仮想環境の作成
