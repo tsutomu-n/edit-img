@@ -762,22 +762,26 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                         except Exception as e:
                             logger.debug(f"一時ファイルの削除に失敗: {e}")
                 
-                # ドライランの場合は実際の保存は行わない
-                if not dry_run:
-                    # ディレクトリが存在するか確認
-                    if not os.path.exists(os.path.dirname(dest_path_str)):
-                        os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
-                    
-                    # バランス値に基づいて最適化パラメータを調整
-                    optimized_quality = adjust_quality_by_balance(quality, balance, format)
-                    
-                    # 出力形式に応じた処理
-                    # 保存する画像を選択
-                    if not keep_original:
-                        save_img = resized_img
-                    else:
-                        save_img = img
+                # 保存する画像を選択（ドライランでも必要）
+                if not keep_original:
+                    save_img = resized_img
+                else:
+                    save_img = img
                 
+                # ドライランの場合は実際の保存は行わない
+                if dry_run:
+                    # ドライランの場合はサイズ見積もりを返すのみ
+                    return True, keep_original, estimated_size
+                
+                # 以下は実際の保存処理
+                # ディレクトリが存在するか確認
+                if not os.path.exists(os.path.dirname(dest_path_str)):
+                    os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
+                
+                # バランス値に基づいて最適化パラメータを調整
+                optimized_quality = adjust_quality_by_balance(quality, balance, format)
+                
+                # 出力形式に応じた処理
                 if format.lower() == 'jpeg':
                     # 拡張子を.jpgに更新
                     dest_path_str = update_extension(dest_path_str, '.jpg')
