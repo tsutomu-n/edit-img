@@ -34,9 +34,17 @@ DEBUG_MODE = True  # Trueにすると詳細なエラー情報を表示
 cancel_process = False  # 処理キャンセルフラグ
 update_queue = queue.Queue()  # スレッド間通信用キュー
 
-def process_images_thread(values, window):
+# 設定ファイルパス
+SETTINGS_FILE = Path(__file__).parent / 'gui_settings.json'
+
+def process_images_thread(values, window, dry_run=False):
     """
     別スレッドで実行する画像処理関数
+    
+    Args:
+        values: GUIからの入力値
+        window: ウィンドウオブジェクト
+        dry_run: プレビューモード（True）か実行モード（False）か
     """
     global cancel_process, update_queue
     cancel_process = False
@@ -123,22 +131,34 @@ def process_images_thread(values, window):
                 total_size_before += file_size_before
                 
                 # 画像処理実行
-                result = core.resize_and_compress_image(
+                success, original_size, estimated_size = core.resize_and_compress_image(
                     img_path, dest_path, width, quality,
                     format=format_type,
                     keep_exif=keep_exif,
                     balance=balance,
-                    dry_run=False
+                    dry_run=dry_run
                 )
                 
-                if result[0]:  # 処理成功
+                if success:  # 処理成功
                     processed += 1
-                    # 処理後のファイルサイズを取得
-                    if dest_path.exists():
-                        file_size_after = dest_path.stat().st_size
-                        total_size_after += file_size_after
+                    # ファイルサイズ情報が取得できた場合、結果を更新
+                    if file_size_before > 0:
+                        # プレビューモードとそうでない場合で分岐
+                        if dry_run and estimated_size is not None:
+                            # 予測サイズを使用
+                            file_size_after = estimated_size
+                            status_prefix = "【プレビュー】予測: "
+                        elif not dry_run:
+                            # 実際のファイルサイズを取得
+                            file_size_after = dest_path.stat().st_size
+                            status_prefix = ""
+                        else:
+                            # 予測できなかった場合
+                            update_queue.put(('status', "サイズ予測ができませんでした"))
+                            continue
+                        
                         reduction = ((file_size_before - file_size_after) / file_size_before * 100)
-                        status_msg = (f"処理: {core.format_file_size(file_size_before)} → "
+                        status_msg = (f"{status_prefix}{core.format_file_size(file_size_before)} → "
                                      f"{core.format_file_size(file_size_after)} ({reduction:.1f}% 削減)")
                         update_queue.put(('status', status_msg))
                 else:
@@ -210,9 +230,15 @@ def process_images_thread(values, window):
                     summary += "\n別のフォルダを使用するか、単純なファイル名の画像を処理してみてください。"
             
             if processed > 0:
-                summary += f"\n総容量: {core.format_file_size(total_size_before)} → {core.format_file_size(total_size_after)}"
-                summary += f" ({reduction_rate:.1f}% 削減)"
-                
+                mode_prefix = "【プレビュー】" if dry_run else ""
+                summary = (f"{mode_prefix}処理完了: {processed}ファイル処理, {errors}エラー, {skipped}スキップ")
+                if total_size_before > 0 and total_size_after > 0:
+                    total_reduction = (total_size_before - total_size_after) / total_size_before * 100
+                    action_msg = "推定削減量" if dry_run else "削減量"
+                    summary += (f"\n合計{action_msg}: {core.format_file_size(total_size_before)} → "
+                                f"{core.format_file_size(total_size_after)} "
+                                f"({total_reduction:.1f}% 削減)")
+            
             # 直接更新せず、キューに送る
             update_queue.put(('status', summary))
             
@@ -222,8 +248,8 @@ def process_images_thread(values, window):
                            f"エラー数: {errors}\n"
                            
             if processed > 0:
-                popup_message += f"\n総容量: {core.format_file_size(total_size_before)} → {core.format_file_size(total_size_after)}"
-                popup_message += f" ({reduction_rate:.1f}% 削減)"
+                popup_message += f"\n合計{action_msg}: {core.format_file_size(total_size_before)} → {core.format_file_size(total_size_after)}"
+                popup_message += f" ({total_reduction:.1f}% 削減)"
                 
             if errors > 0 and os.name == 'nt':
                 popup_message += f"\n\n注意: {errors}個のファイルでエラーが発生しました。" \
@@ -259,6 +285,11 @@ def process_images_thread(values, window):
     finally:
         # UI状態を元に戻すようキューに送る
         update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_cancel', {'disabled': True}))
+        
+        # 処理完了時のUIリセット
+        update_queue.put(('btn_preview', {'disabled': False}))
+        update_queue.put(('btn_execute', {'disabled': values.get('preview_mode', True)}))
         update_queue.put(('btn_cancel', {'disabled': True}))
 
 
@@ -304,6 +335,55 @@ def setup_logger():
     
     return current_log_file
 
+def load_settings():
+    """
+    保存された設定を読み込む
+    """
+    default_settings = {
+        'source': './input',
+        'dest': './output',
+        'width': 1200,
+        'quality': 87,
+        'format_jpeg': True,
+        'format_png': False,
+        'format_webp': False,
+        'balance': 5,
+        'keep_exif': True,
+        'preview_mode': True,  # デフォルトはプレビューモード
+    }
+    
+    if not SETTINGS_FILE.exists():
+        return default_settings
+        
+    try:
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            saved_settings = json.load(f)
+        # デフォルト設定をロードした設定で上書き
+        settings = default_settings.copy()
+        settings.update(saved_settings)
+        return settings
+    except Exception as e:
+        logger.error(f"設定ファイル読み込みエラー: {e}")
+        return default_settings
+
+def save_settings(settings):
+    """
+    設定をJSONファイルに保存
+    """
+    try:
+        # GUIコントロール関連の値を除外
+        save_keys = ['source', 'dest', 'width', 'quality', 'format_jpeg', 
+                    'format_png', 'format_webp', 'balance', 'keep_exif',
+                    'preview_mode']
+        save_data = {k: settings[k] for k in save_keys if k in settings}
+        
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(save_data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"設定ファイル保存エラー: {e}")
+        return False
+
 def main():
     """
     メイン関数 - GUIアプリケーションを実行します
@@ -316,16 +396,8 @@ def main():
         logger.info(f"Pythonバージョン: {sys.version}")
         logger.info(f"OS情報: {os.name} - {sys.platform}")
         
-        # デフォルト設定
-        settings = {
-            'source': './input',
-            'dest': './output',
-            'width': 1200,
-            'quality': 87,
-            'format': 'jpeg',
-            'balance': 5,
-            'keep_exif': True
-        }
+        # 設定を読み込む
+        settings = load_settings()
         
         # レイアウト定義
         layout = [
@@ -345,26 +417,28 @@ def main():
             
             # 出力形式選択
             [eg.Text('出力形式:', size=(12, 1)),
-             eg.Radio('JPEG', 'format', key='format_jpeg', default=settings['format']=='jpeg'),
-             eg.Radio('PNG', 'format', key='format_png', default=settings['format']=='png'),
-             eg.Radio('WebP', 'format', key='format_webp', default=settings['format']=='webp')],
+             eg.Radio('JPEG', 'format', key='format_jpeg', default=settings.get('format_jpeg', True)),
+             eg.Radio('PNG', 'format', key='format_png', default=settings.get('format_png', False)),
+             eg.Radio('WebP', 'format', key='format_webp', default=settings.get('format_webp', False))],
              
             # 圧縮と品質のバランス調整
             [eg.Text('圧縮バランス:', size=(12, 1)), 
-             eg.Slider(range=(1, 10), default_value=settings['balance'], orientation='h', width=40, 
+             eg.Slider(range=(1, 10), default_value=settings.get('balance', 5), orientation='h', width=40, 
                       key='balance')],
             [eg.Text('', size=(12, 1)), eg.Text('1=最高圧縮率(ファイルサイズ優先) / 10=最高品質(画質優先)', size=(40, 1))],
             
             # メタデータオプション
-            [eg.Text('', size=(12, 1)), eg.Checkbox('EXIFメタデータを保持', default=settings['keep_exif'], key='keep_exif')],
+            [eg.Text('', size=(12, 1)), eg.Checkbox('EXIFメタデータを保持', default=settings.get('keep_exif', True), key='keep_exif')],
+            [eg.Checkbox("プレビューモード（ファイルを実際に保存しません）", default=settings.get('preview_mode', True), key="preview_mode")],
             [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
             [eg.Text('進行状況:'), eg.Slider(range=(0, 100), default_value=0, resolution=1, 
                       orientation='h', width=45, key='progress', disabled=True),
              eg.Text('0%', key='progress_text', size=(5, 1))],
             [eg.Text('準備完了', key='status')],
-            [eg.Button('実行', key='btn_start'), 
-             eg.Button('キャンセル', key='btn_cancel', disabled=True), 
-             eg.Button('終了')]
+            [eg.Button("プレビュー", key="btn_preview", button_color=('white', '#4CAF50')), 
+             eg.Button("実行", key="btn_execute", button_color=('white', '#2196F3'), disabled=settings.get('preview_mode', True)),
+             eg.Button("キャンセル", key="btn_cancel", button_color=('white', '#f44336'), disabled=True),
+             eg.Button("終了", key="exit")]
         ]
         
         # ウィンドウ作成
@@ -418,12 +492,33 @@ def main():
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
             
             if event in (eg.WINDOW_CLOSED, '終了'):
+                # 設定を保存
+                save_settings(values)
                 break
                 
-            elif event == 'btn_start':
+            elif event == 'preview_mode':
+                # プレビューモードの切り替え時の処理
+                window['btn_execute'].update(disabled=values['preview_mode'])
+                
+                # 適切なボタンを強調表示
+                if values['preview_mode']:
+                    window['btn_preview'].update(button_color=('white', '#4CAF50'))  # 緑色強調
+                    window['btn_execute'].update(button_color=('white', '#A0A0A0'))  # グレー化
+                else:
+                    window['btn_preview'].update(button_color=('white', '#A0A0A0'))  # グレー化
+                    window['btn_execute'].update(button_color=('white', '#2196F3'))  # 青色強調
+                
+            elif event == 'btn_preview' or event == 'btn_execute':
+                # プレビューか実行かの判定
+                is_preview = event == 'btn_preview'
                 # 入力値の検証
                 source_dir = values['source']
                 dest_dir = values['dest']
+                
+                # プレビューモードの場合はチェックボックスを強制的にオン
+                if is_preview:
+                    values['preview_mode'] = True
+                    window['preview_mode'].update(True)
                 
                 if not os.path.exists(source_dir):
                     eg.popup_error(f'入力フォルダが見つかりません: {source_dir}')
@@ -443,14 +538,18 @@ def main():
                         continue
                         
                 # UI状態更新
-                window['btn_start'].update(disabled=True)
+                window['btn_preview'].update(disabled=True)
+                window['btn_execute'].update(disabled=True)
                 window['btn_cancel'].update(disabled=False)
-                window['status'].update(f"処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
+                
+                # モードに応じたステータス表示
+                mode_prefix = "【プレビュー】" if is_preview else ""
+                window['status'].update(f"{mode_prefix}処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
                 
                 # 別スレッドで処理実行
                 processing_thread = threading.Thread(
                     target=process_images_thread,
-                    args=(values, window),
+                    args=(values, window, is_preview),  # プレビューフラグを渡す
                     daemon=True
                 )
                 processing_thread.start()
