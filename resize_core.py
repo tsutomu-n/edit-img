@@ -107,6 +107,44 @@ def get_windows_error_message(error_code):
     return WINDOWS_ERROR_MESSAGES.get(error_code, "不明なエラー")
 
 
+def retry_on_file_error(func, *args, max_retries=3, retry_delay=0.5, **kwargs):
+    """
+    ファイル操作に関連する関数を実行し、エラー時にリトライするラッパー関数
+    
+    Args:
+        func: 実行する関数
+        *args: 関数の引数
+        max_retries: 最大リトライ回数
+        retry_delay: リトライ間の待機時間（秒）
+        **kwargs: 関数のキーワード引数
+        
+    Returns:
+        関数の結果
+        
+    Raises:
+        最大リトライ回数後も失敗した場合は最後の例外を再送出
+    """
+    retries = 0
+    last_exception = None
+    
+    while retries < max_retries:
+        try:
+            return func(*args, **kwargs)
+        except (PermissionError, OSError) as e:
+            last_exception = e
+            retries += 1
+            logger.debug(f"ファイル操作エラー: {e} - リトライ {retries}/{max_retries}")
+            
+            # Windows環境ではファイルロックが一時的な場合があるため、待機して再試行
+            time.sleep(retry_delay)
+    
+    # 最大リトライ回数到達後も失敗した場合
+    if last_exception:
+        logger.error(f"最大リトライ回数到達: {last_exception}")
+        raise last_exception
+    return None
+
+
 def is_long_path_enabled():
     """
     Windows環境で長いパスサポートが有効か確認します

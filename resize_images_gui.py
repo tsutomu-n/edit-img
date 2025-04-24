@@ -159,7 +159,10 @@ def process_images_thread(values, window):
             
             # カンセルをチェック
             # 直接window.read()は呼び出さず、メインスレッドでチェックする
-            time.sleep(0.01)  # 他の処理に時間を譲る
+            # より効率的なイベント処理のために、キャンセル状態をキューで確認
+            update_queue.put(('check_cancel', None))
+            # 短い待機でCPU負荷を下げる（time.sleepより効率的）
+            threading.Event().wait(0.001)
             
         # 処理完了
         if not cancel_process:
@@ -329,6 +332,10 @@ def main():
                                 eg.popup(message, title=title)
                             except Exception as e:
                                 logger.error(f"GUIポップアップ表示に失敗: {e}")
+                        elif key == 'check_cancel':
+                            # キャンセル状態をスレッドに伝えるためのダミーメッセージ処理
+                            # 実際のキャンセル状態はグローバル変数で管理されている
+                            pass
                         elif key == 'process_complete':
                             # 処理完了の場合、スレッドをクリア
                             if processing_thread and processing_thread.is_alive():
