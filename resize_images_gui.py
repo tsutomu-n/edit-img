@@ -19,7 +19,9 @@ from datetime import datetime
 from pathlib import Path
 
 # TkEasyGUI
-import TkEasyGUI.widgets as eg
+import TkEasyGUI as eg
+from TkEasyGUI import widgets
+from TkEasyGUI import dialogs
 
 # カスタム画像処理モジュール
 import resize_core as core
@@ -170,57 +172,61 @@ def process_images_thread(values, window):
                 summary += f"({errors}個のエラー) "
                 # エラーの場合の追加情報
                 if os.name == 'nt' and errors > 0:
-                    if any("not in the subpath" in str(e) for e in core.logger.handlers[0].buffer if hasattr(core.logger.handlers[0], 'buffer')):
-                        summary += "\n注意: Windowsの長いパスや絵文字を含むファイル名で問題が発生しています。"
-                        summary += "\n別のフォルダを使用するか、単純なファイル名の画像を処理してみてください。"
+                    # ログ出力から判断しない
+                    summary += "\n注意: Windowsでは長いパスや特殊文字を含むファイル名で問題が発生することがあります。"
+                    summary += "\n別のフォルダを使用するか、単純なファイル名の画像を処理してみてください。"
             
             if processed > 0:
                 summary += f"\n総容量: {core.format_file_size(total_size_before)} → {core.format_file_size(total_size_after)}"
                 summary += f" ({reduction_rate:.1f}% 削減)"
                 
-            window['status'].update(summary)
+            # 直接更新せず、キューに送る
+            update_queue.put(('status', summary))
             
-            # 結果ダイアログ表示
+            # 結果ダイアログ表示の内容もキューに送る
             popup_message = f"処理完了!\n\n" \
                            f"処理ファイル数: {processed}\n" \
                            f"エラー数: {errors}\n"
                            
             if processed > 0:
-                popup_message += f"元のサイズ: {core.format_file_size(total_size_before)}\n" \
-                                f"処理後サイズ: {core.format_file_size(total_size_after)}\n" \
-                                f"削減率: {reduction_rate:.1f}%"
-                                
+                popup_message += f"\n総容量: {core.format_file_size(total_size_before)} → {core.format_file_size(total_size_after)}"
+                popup_message += f" ({reduction_rate:.1f}% 削減)"
+                
             if errors > 0 and os.name == 'nt':
                 popup_message += f"\n\n注意: {errors}個のファイルでエラーが発生しました。" \
                                 f"ログを確認してください。"
             
-            eg.popup(popup_message, title="処理結果")
+            # パップアップの表示リクエストをキューに送る
+            update_queue.put(('popup', {'message': popup_message, 'title': "処理結果"}))
+            # 処理完了フラグも送信
+            update_queue.put(('process_complete', True))
     except Exception as e:
         # エラー内容の詳細なログ記録
         error_msg = str(e)
         error_trace = traceback.format_exc()
         logger.error(f"予期せぬエラー: {error_msg}")
-        logger.error(f"トレースバック情報: \n{error_trace}")
+        logger.error(f"トレースバック情報:\n{error_trace}")
         
-        # デバッグモードの場合は詳細情報を表示
+        # キューを使ってエラー情報を送信
+        status_msg = f"予期せぬエラー: {error_msg}"
+        update_queue.put(('status', status_msg))
+        
+        # デバッグモードの場合は詳細情報も送信
         if DEBUG_MODE:
             error_detail = f"{error_msg}\n\n{error_trace if error_trace else ''}" 
-            window['status'].update(f"予期せぬエラー\n(詳細はログファイルを確認): {error_detail}")
-            # エラーダイアログ表示
-            eg.popup_error(f"予期せぬエラーが発生しました\n\n{error_detail}", title="エラー")
-        else:
-            window['status'].update(f"予期せぬエラー: {error_msg}\n(詳細はログファイルを確認)")
-            # シンプルなエラーダイアログ
-            eg.popup_error(f"予期せぬエラーが発生しました: {error_msg}", title="エラー")
+            update_queue.put(('error_popup', error_detail))
+            
+        # 処理完了フラグも送信
+        update_queue.put(('process_complete', True))
         
-        # ボタンの状態を元に戻す
-        window['btn_start'].update(disabled=False)
-        window['btn_cancel'].update(disabled=True)
+        # ボタンの状態を元に戻すようキューに送る
+        update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_cancel', {'disabled': True}))
         
     finally:
-        # UI状態を元に戻す
-        window['btn_start'].update(disabled=False)
-        window['btn_cancel'].update(disabled=True)
+        # UI状態を元に戻すようキューに送る
+        update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_cancel', {'disabled': True}))
 
 
 def setup_logger():
@@ -314,6 +320,15 @@ def main():
                                 eg.popup_error(value, title="エラー")
                             except Exception as e:
                                 logger.error(f"GUIエラーポップアップ表示に失敗: {e}")
+                        elif key == 'popup':
+                            # 通常のポップアップを表示
+                            try:
+                                # valueは追加パラメータを持つ辞書
+                                message = value.get('message', '')
+                                title = value.get('title', '情報')
+                                eg.popup(message, title=title)
+                            except Exception as e:
+                                logger.error(f"GUIポップアップ表示に失敗: {e}")
                         elif key == 'process_complete':
                             # 処理完了の場合、スレッドをクリア
                             if processing_thread and processing_thread.is_alive():
