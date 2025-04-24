@@ -532,34 +532,48 @@ def find_image_files(source_dir):
         return []
 
 
-def resize_and_compress_image(source_path, dest_path, target_width, quality, dry_run=False):
+def process_image(source_path, dest_dir, target_width, quality):
     """
-    画像をリサイズして圧縮します
+    画像を処理し、結果を返します
     
     Args:
-        source_path: 元の画像ファイルパス (Path)
-        dest_path: 出力先ファイルパス (Path)
-        target_width: 目標の幅 (ピクセル)
-        quality: JPEG圧縮品質 (1-100)
-        dry_run: 実際の処理を行わずサイズ見積もりのみ実施
+        source_path: 元画像パス
+        dest_dir: 出力先ディレクトリ
+        target_width: 目標の幅
+        quality: JPEG品質 (1-100)
         
     Returns:
-        tuple: (成功したか, 元のサイズを維持したか, 見積もりサイズ)
+        tuple: (成功したか, 元サイズ, 新サイズ, 削減率)
     """
     try:
-        # ファイルパスを文字列に変換
-        source_path_str = str(source_path)
-        dest_path_str = str(dest_path)
-        
-        # Windows環境では長いパス対応
-        if os.name == 'nt':
-            source_path_str = normalize_long_path(source_path)
-            dest_path_str = normalize_long_path(dest_path)
+        # パスの正規化にリトライ機構を使用
+        def normalize_path_with_retry(path):
+            return normalize_long_path(path, remove_prefix=True)
             
+        source_path_str = retry_on_file_error(normalize_path_with_retry, source_path, max_retries=3, retry_delay=0.2)
+        source_path = Path(source_path_str)
+
+        # 実際に存在するか確認し、存在しない場合は再試行
+        def check_file_exists(path):
+            if not Path(path).exists():
+                raise FileNotFoundError(f"ファイルが存在しません: {path}")
+            return True
+            
+        retry_on_file_error(check_file_exists, source_path_str, max_retries=3, retry_delay=0.3)
+
+        # ファイルサイズ取得にリトライ機構を使用
+        def get_size(path):
+            return os.path.getsize(path)
+            
+        file_size_before = retry_on_file_error(get_size, source_path_str, max_retries=3, retry_delay=0.2)
+
         # 出力先ディレクトリを作成
+        dest_path = get_destination_path(source_path, source_path.parent, dest_dir)
         dest_dir = Path(dest_path).parent
         success, created_dir = create_directory_with_permissions(dest_dir)
         if not success:
+            logger.error(f"出力先ディレクトリを作成できませんでした: {dest_dir}")
+            return False, None, None, None
             return False, False, None
 
         # 画像を開いて処理

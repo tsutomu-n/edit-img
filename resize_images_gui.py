@@ -249,16 +249,30 @@ def setup_logger():
         level=log_level
     )
     
-    # ファイル出力用のロガー設定
+    # ログディレクトリの作成
+    import os
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # ファイル出力用のロガー設定（ローテーション付き）
     from datetime import datetime
-    log_filename = f"process_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.log"
+    log_filename = os.path.join(log_dir, "process_{time}.log")
+    
+    # ログローテーション設定を実装
     logger.add(
         log_filename,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
-        level="DEBUG"  # ファイルには常に詳細情報を記録
+        level="DEBUG",  # ファイルには常に詳細情報を記録
+        rotation="500 KB",  # ファイルサイズが500KBを超えたらローテーション
+        retention="10 days",  # ログは10日間保持
+        compression="zip",  # 古いログをzip形式で圧縮
+        encoding="utf-8"  # 日本語パスに対応
     )
     
-    return log_filename
+    # 実際のファイル名を取得（現在のタイムスタンプが入る）
+    current_log_file = os.path.join(log_dir, f"process_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+    
+    return current_log_file
 
 def main():
     """
@@ -318,17 +332,33 @@ def main():
                     if msg:
                         key, value = msg
                         if key == 'error_popup':
-                            # エラーポップアップを表示
-                            try:
-                                eg.popup_error(value, title="エラー")
-                            except Exception as e:
-                                logger.error(f"GUIエラーポップアップ表示に失敗: {e}")
+                            # 処理前の合計サイズ計算
+            total_size_before = 0
+            
+            # メモリ使用量の最適化のため、大量の画像を処理する場合はバッチ処理
+            batch_size = 10  # 一度に処理するファイル数
+            for i in range(0, len(image_files), batch_size):
+                batch = image_files[i:i+batch_size]
+                for img_path in batch:
+                    try:
+                        # リトライ機構を利用
+                        def get_size(path):
+                            return os.path.getsize(path)
+                            
+                        size = core.retry_on_file_error(get_size, img_path, max_retries=2, retry_delay=0.1)
+                        total_size_before += size
+                    except Exception as e:
+                        logger.error(f"ファイルサイズ取得エラー: {e} - {img_path}")
+                
+                # 定期的にガベージコレクションを実行
+                import gc
+                gc.collect()
                         elif key == 'popup':
                             # 通常のポップアップを表示
                             try:
                                 # valueは追加パラメータを持つ辞書
                                 message = value.get('message', '')
-                                title = value.get('title', '情報')
+{{ ... }}
                                 eg.popup(message, title=title)
                             except Exception as e:
                                 logger.error(f"GUIポップアップ表示に失敗: {e}")
