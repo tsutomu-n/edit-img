@@ -46,7 +46,10 @@ def process_images_thread(values, window):
             return
             
         # プログレスバーの設定
-        window['progress'].update(0, max=len(image_files))
+        # Sliderコンポーネント用の更新
+        window['progress'].update(range=(0, len(image_files)))
+        window['progress'].update(value=0)
+        window['progress_text'].update('0%')
         window['status'].update(f"処理開始: 合計 {len(image_files)} ファイル")
         
         # 処理結果の統計
@@ -99,9 +102,18 @@ def process_images_thread(values, window):
                 errors += 1
                 
             # 進捗更新
-            window['progress'].update(idx + 1)
-            # GUI応答性維持のための短い待機
-            time.sleep(0.01)
+            progress_value = idx + 1
+            progress_percent = int((progress_value / len(image_files)) * 100)
+            window['progress'].update(value=progress_value)
+            window['progress_text'].update(f'{progress_percent}%')
+            
+            # GUI応答性維持のためのイベントチェック
+            event, values = window.read(timeout=10)
+            if event == 'btn_cancel':
+                if self._cancel_requested and not self._cancellation_confirmed:
+                    self._cancellation_confirmed = True
+            # タイムアウトイベントで対応するのでここでの待機は不要
+            # time.sleep(0.01)
             
         # 処理完了
         if not cancel_process:
@@ -160,7 +172,9 @@ def main():
          eg.Slider(range=(30, 100), default_value=settings['quality'], 
                   orientation='h', size=(40, 15), key='quality')],
         [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
-        [eg.ProgressBar(100, orientation='h', size=(54, 20), key='progress')],
+        [eg.Text('進行状況:'), eg.Slider(range=(0, 100), default_value=0, resolution=1, 
+                  orientation='h', size=(45, 15), key='progress', disabled=True),
+         eg.Text('0%', key='progress_text', size=(5, 1))],
         [eg.Text('準備完了', key='status')],
         [eg.Button('実行', key='btn_start'), 
          eg.Button('キャンセル', key='btn_cancel', disabled=True), 
