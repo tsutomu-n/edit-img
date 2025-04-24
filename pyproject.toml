@@ -8,7 +8,7 @@ dependencies = [
     "loguru>=0.7.3",
     "pillow>=9.0.0",
     "tqdm>=4.60.0",
-    "TkEasyGUI==0.2.80",
+    "TkEasyGUI==0.2.20",
 ]
 
 [project.scripts]
