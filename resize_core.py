@@ -431,79 +431,107 @@ def get_destination_path(source_path, source_dir, dest_dir):
     Returns:
         Path: 出力先のパス
     """
+    # 全ての変数を最初に定義してスコープの問題を回避
+    source_path_str = ""
+    source_dir_str = ""
+    dest_path = None
+    safe_name = ""
+    rel_path_str = ""
+    is_long_path = False
+    path_parts = []
+    
+    # メイン処理部分
     try:
-        # Windows対応：\\?\ プレフィックスを一時的に削除して処理
+        # 入力値の安全な文字列化
         source_path_str = str(source_path)
         source_dir_str = str(source_dir)
+        dest_dir_str = str(dest_dir)
         
-        is_long_path = False
+        # Windowsの長いパス処理
         if os.name == 'nt' and source_path_str.startswith('\\\\?\\'):
             is_long_path = True
-            source_path_str = source_path_str[4:]  # \\?\ を削除
+            source_path_str = source_path_str[4:]
             source_dir_str = source_dir_str[4:] if source_dir_str.startswith('\\\\?\\') else source_dir_str
         
-        # 文字列ベースで相対パスを計算（Windows長パス問題を回避）
+        # 相対パスの計算
         if not source_path_str.startswith(source_dir_str):
-            # 正規化されていない可能性があるので絶対パスで試行
+            # 絶対パスで試行
             abs_source = os.path.abspath(source_path_str)
             abs_source_dir = os.path.abspath(source_dir_str)
             
             if not abs_source.startswith(abs_source_dir):
-                raise ValueError(f"'{source_path_str}' is not in the subpath of '{source_dir_str}'")
-                
-            # 相対パスを手動で計算
+                # パスが一致しない場合はファイル名のみを使用
+                safe_name = sanitize_filename(os.path.basename(source_path_str))
+                return Path(dest_dir_str) / safe_name
+            
             rel_path_str = abs_source[len(abs_source_dir):].lstrip(os.sep)
         else:
-            # 直接相対パス計算
             rel_path_str = source_path_str[len(source_dir_str):].lstrip(os.sep)
         
-        # 出力先パスを構築
-        dest_path = dest_dir
-        
-        # パスを分割して処理
+        # パス部分の分割
         path_parts = rel_path_str.split(os.sep)
         
-        # ディレクトリ部分を処理
-        for part in path_parts[:-1]:  # ファイル名を除く
-            safe_part = sanitize_filename(part)
-            dest_path = dest_path / safe_part
-            
-        # ファイル名部分の処理（最後の部分）
+        # 出力先パスの構築
+        dest_path = Path(dest_dir_str)
+        
+        # ディレクトリ部分の処理
+        if len(path_parts) > 1:
+            for part in path_parts[:-1]:
+                part_safe = sanitize_filename(part)
+                dest_path = dest_path / part_safe
+                
+            # ディレクトリ作成
+            try:
+                parent_dir = dest_path
+                success, _ = create_directory_with_permissions(parent_dir)
+                if not success:
+                    logger.warning(f"出力先ディレクトリを作成できませんでした: {parent_dir}")
+            except Exception as dir_err:
+                logger.warning(f"ディレクトリ作成エラー: {dir_err}")
+        
+        # ファイル名部分の処理
         if path_parts:
             filename = sanitize_filename(path_parts[-1])
             dest_path = dest_path / filename
+        else:
+            # パスが空の場合は元のファイル名を使用
+            safe_name = sanitize_filename(os.path.basename(source_path_str))
+            dest_path = Path(dest_dir_str) / safe_name
         
-        # Windows環境では長いパスの処理
-        if os.name == 'nt':
-            # 出力先ディレクトリを作成
-            parent_dir = dest_path.parent
-            success, _ = create_directory_with_permissions(parent_dir)
-            if not success:
-                logger.error(f"出力先ディレクトリを作成できませんでした: {parent_dir}")
-                
-            # 長いパスの処理
-            if is_long_path:
-                dest_path_str = normalize_long_path(dest_path)
+        # Windowsの長いパス処理
+        if os.name == 'nt' and is_long_path:
+            try:
+                dest_path_str = normalize_long_path(str(dest_path))
                 return Path(dest_path_str)
-        
-        # 出力先ディレクトリを作成
-        parent_dir = dest_path.parent
-        success, _ = create_directory_with_permissions(parent_dir)
-        if not success:
-            logger.error(f"出力先ディレクトリを作成できませんでした: {parent_dir}")
+            except Exception as path_err:
+                logger.warning(f"長いパスの正規化エラー: {path_err}")
         
         return dest_path
         
     except Exception as e:
-        logger.error(f"予期せぬエラー: {e}")
-        # エラー時は出力ディレクトリにファイル名だけを付ける
+        logger.error(f"出力先パス生成エラー: {e}")
+        
+        # 全てのエラー処理はここで行う
         try:
-            safe_name = sanitize_filename(source_path.name)
-            return Path(str(dest_dir)) / safe_name
-        except Exception as inner_e:
-            logger.error(f"出力先パス生成の最終エラー: {inner_e}")
-            # 最終手段としてファイル名のみを返す
-            return Path(source_path.name)
+            # 元のファイル名を取得
+            if hasattr(source_path, 'name'):
+                filename = str(source_path.name)
+            else:
+                filename = os.path.basename(str(source_path))
+                
+            # 安全なファイル名に変換
+            safe_name = sanitize_filename(filename)
+            
+            # 出力先ディレクトリと結合
+            if hasattr(dest_dir, '__truediv__'):
+                return dest_dir / safe_name
+            else:
+                return Path(str(dest_dir)) / safe_name
+                
+        except Exception as last_error:
+            logger.error(f"最終的なエラー: {last_error}")
+            # 最後の手段として、ファイル名のみを返す
+            return Path("output_file.jpg")
 
 
 def find_image_files(source_dir):
