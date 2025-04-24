@@ -587,13 +587,31 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, dry
                 if dry_run or not keep_original:
                     # テンポラリパスを用意
                     import tempfile
-                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=True) as tmp:
-                        # 一時ファイルに保存してサイズを計測
+                    import uuid
+                    import time
+                    
+                    # Windows環境での権限問題に対応するため、一意なファイル名を使用
+                    temp_dir = tempfile.gettempdir()
+                    temp_filename = f"resize_temp_{uuid.uuid4().hex}.jpg"
+                    temp_path = os.path.join(temp_dir, temp_filename)
+                    
+                    # リトライ機構を使って一時ファイル操作
+                    def save_temp_image():
+                        resized_img.save(temp_path, format='JPEG', quality=quality)
+                        return os.path.getsize(temp_path)
+                    
+                    try:
+                        # リトライ機構で一時ファイルを保存してサイズを計測
+                        estimated_size = retry_on_file_error(save_temp_image, max_retries=3, retry_delay=0.5)
+                    except Exception as e:
+                        logger.error(f"サイズ見積もりエラー: {e}")
+                    finally:
+                        # 一時ファイルの削除を試みる
                         try:
-                            resized_img.save(tmp.name, format='JPEG', quality=quality)
-                            estimated_size = os.path.getsize(tmp.name)
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
                         except Exception as e:
-                            logger.error(f"サイズ見積もりエラー: {e}")
+                            logger.debug(f"一時ファイルの削除に失敗: {e}")
                 
                 # ドライランの場合は実際の保存は行わない
                 if not dry_run:
