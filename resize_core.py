@@ -495,10 +495,15 @@ def get_destination_path(source_path, source_dir, dest_dir):
         return dest_path
         
     except Exception as e:
-        logger.error(f"出力先パス生成エラー: {e}")
+        logger.error(f"予期せぬエラー: {e}")
         # エラー時は出力ディレクトリにファイル名だけを付ける
-        safe_name = sanitize_filename(source_path.name)
-        return dest_dir / safe_name
+        try:
+            safe_name = sanitize_filename(source_path.name)
+            return Path(str(dest_dir)) / safe_name
+        except Exception as inner_e:
+            logger.error(f"出力先パス生成の最終エラー: {inner_e}")
+            # 最終手段としてファイル名のみを返す
+            return Path(source_path.name)
 
 
 def find_image_files(source_dir):
