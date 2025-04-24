@@ -19,9 +19,9 @@ from datetime import datetime
 from pathlib import Path
 
 # TkEasyGUI
-import tkeasygui as eg
-from tkeasygui import widgets
-from tkeasygui import dialogs
+import TkEasyGUI as eg
+from TkEasyGUI import widgets
+from TkEasyGUI import dialogs
 
 # カスタム画像処理モジュール
 import resize_core as core
@@ -381,6 +381,35 @@ def main():
                         if key == 'error_popup':
                             # エラーポップアップの処理
                             messagebox.showerror("エラー", value)
+                        elif key == 'popup':
+                            # 通常のポップアップを表示
+                            try:
+                                # valueは追加パラメータを持つ辞書
+                                message = value.get('message', '')
+                                title = value.get('title', '情報')
+                                eg.popup(message, title=title)
+                            except Exception as e:
+                                logger.error(f"GUIポップアップ表示に失敗: {e}")
+                        elif key == 'check_cancel':
+                            # キャンセル状態をスレッドに伝えるためのダミーメッセージ処理
+                            # 実際のキャンセル状態はグローバル変数で管理されている
+                            pass
+                        elif key == 'process_complete':
+                            # 処理完了の場合、スレッドをクリア
+                            if processing_thread and processing_thread.is_alive():
+                                processing_thread.join(0.1)  # スレッド終了を確認
+                            processing_thread = None
+                        elif isinstance(value, dict):
+                            # 追加パラメータ付きの更新
+                            window[key].update(**value)
+                        else:
+                            # 単純な更新
+                            window[key].update(value)
+                    update_queue.task_done()
+            except queue.Empty:
+                # キューが空の場合、処理を続行
+                pass
+                
             # 処理前の合計サイズ計算
             total_size_before = 0
             
@@ -402,33 +431,6 @@ def main():
                 # 定期的にガベージコレクションを実行
                 import gc
                 gc.collect()
-                        elif key == 'popup':
-                            # 通常のポップアップを表示
-                            try:
-                                # valueは追加パラメータを持つ辞書
-                                message = value.get('message', '')
-{{ ... }}
-                                eg.popup(message, title=title)
-                            except Exception as e:
-                                logger.error(f"GUIポップアップ表示に失敗: {e}")
-                        elif key == 'check_cancel':
-                            # キャンセル状態をスレッドに伝えるためのダミーメッセージ処理
-                            # 実際のキャンセル状態はグローバル変数で管理されている
-                            pass
-                        elif key == 'process_complete':
-                            # 処理完了の場合、スレッドをクリア
-                            if processing_thread and processing_thread.is_alive():
-                                processing_thread.join(0.1)  # スレッド終了を確認
-                            processing_thread = None
-                        elif isinstance(value, dict):
-                            # 追加パラメータ付きの更新
-                            window[key].update(**value)
-                        else:
-                            # 単純な更新
-                            window[key].update(value)
-                    update_queue.task_done()
-            except queue.Empty:
-                pass  # キューが空の場合は無視
             
             # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
