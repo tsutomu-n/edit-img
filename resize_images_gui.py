@@ -352,7 +352,8 @@ def main():
             # 圧縮と品質のバランス調整
             [eg.Text('圧縮バランス:', size=(12, 1)), 
              eg.Slider(range=(1, 10), default_value=settings['balance'], orientation='h', width=40, 
-                      key='balance', tooltip='1=最高圧縮率、ファイルサイズ優先 / 10=最高品質、画質優先')],
+                      key='balance')],
+            [eg.Text('', size=(12, 1)), eg.Text('1=最高圧縮率(ファイルサイズ優先) / 10=最高品質(画質優先)', size=(40, 1))],
             
             # メタデータオプション
             [eg.Text('', size=(12, 1)), eg.Checkbox('EXIFメタデータを保持', default=settings['keep_exif'], key='keep_exif')],
