@@ -19,9 +19,9 @@ from datetime import datetime
 from pathlib import Path
 
 # TkEasyGUI
-import TkEasyGUI as eg
-from TkEasyGUI import widgets
-from TkEasyGUI import dialogs
+import tkeasygui as eg
+from tkeasygui import widgets
+from tkeasygui import dialogs
 
 # カスタム画像処理モジュール
 import resize_core as core
