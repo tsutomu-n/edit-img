@@ -1,7 +1,7 @@
 [project]
 name = "edit-img"
-version = "0.2.0"
-description = "日本語対応の画像リサイズ・圧縮ツール（GUI対応版）"
+version = "0.2.1"
+description = "日本語対応の画像リサイズ・圧縮ツール（GUI対応版・Windows長パス対応）"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

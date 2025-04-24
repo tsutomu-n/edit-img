@@ -12,46 +12,83 @@
 import os
 import sys
 import json
-import shutil
 import argparse
 import time
 import signal
 from pathlib import Path
 from datetime import datetime
-from PIL import Image, UnidentifiedImageError
-from loguru import logger
 from tqdm import tqdm
+
+# コア機能をインポート
+import resize_core as core
+from resize_core import logger
 
 # シグナルハンドラー変数
 interrupt_requested = False
 
-# Windows固有のエラーコードと対応する日本語メッセージ
-WINDOWS_ERROR_MESSAGES = {
-    2: "指定されたファイルが見つかりません",
-    3: "指定されたパスが見つかりません",
-    5: "アクセスが拒否されました。管理者権限で実行するか、ファイルの権限を確認してください",
-    32: "ファイルが他のプロセスで使用中です。開いているアプリケーションを閉じてください",
-    80: "ファイル名が正しくありません。使用できない文字が含まれています",
-    123: "ファイル名、ディレクトリ名、またはボリュームラベルの構文が正しくありません",
-    145: "ディレクトリが空ではありません",
-    183: "この名前のファイルまたはディレクトリが既に存在しています",
-    206: "ファイルパスが長すぎます。260文字以内に収まるパスを使用してください",
-    1920: "メディアが書き込み保護されています",
-    3: "指定されたパスが見つかりません"
-}
-
 # Ctrl+Cハンドラー
 def signal_handler(sig, frame):
+    """シグナルハンドラー関数"""
     global interrupt_requested
-    print("\n処理の中断がリクエストされました。現在のファイル処理後に停止します。")
+    logger.warning("\n中断シグナルを受信しました。安全に処理を停止します...")
     interrupt_requested = True
+
+# シグナルハンドラーを登録
+signal.signal(signal.SIGINT, signal_handler)
+
+def calculate_reduction_percentage(source_size, dest_size):
+    """ファイルサイズの削減率を計算する関数"""
+    if source_size == 0:
+        return 0
+    
+    return (source_size - dest_size) / source_size * 100
+
+def parse_args():
+    """コマンドライン引数を解析する関数"""
+    parser = argparse.ArgumentParser(
+        description="画像ファイルを指定された幅にリサイズし、JPEG形式で圧縮して保存します。"
+    )
+    parser.add_argument(
+        "-s", "--source", required=True,
+        help="入力元のディレクトリパス"
+    )
+    parser.add_argument(
+        "-d", "--dest", required=True,
+        help="出力先のディレクトリパス"
+    )
+    parser.add_argument(
+        "-w", "--width", type=int, default=1280,
+        help="リサイズ後の最大幅 (デフォルト: 1280)"
+    )
+    parser.add_argument(
+        "-q", "--quality", type=int, default=85,
+        help="JPEGの品質 (0-100、デフォルト: 85)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="ドライランモード（実際にファイルを保存せずシミュレートする）"
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="既存の出力ファイルがあればスキップする"
+    )
+    parser.add_argument(
+        "--log-level", default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="ログレベルを設定する (デフォルト: INFO)"
+    )
+    parser.add_argument(
+        "--check-disk", action="store_true",
+        help="処理前にディスク容量を確認する"
+    )
+    
+    return parser.parse_args()
 
 # ログ設定
 logger.remove()  # デフォルト設定を削除
 logger.add(
     sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}</cyan>: <white>{message}</white>",
-    colorize=True,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
     level="INFO"
 )
 logger.add(
@@ -90,164 +127,6 @@ def calculate_reduction_rate(source_dir, dest_dir):
     
     return (source_size - dest_size) / source_size * 100
 
-def check_disk_space(path, required_space_mb=500):
-    """ディスクの空き容量を確認"""
-    try:
-        total, used, free = shutil.disk_usage(path)
-        free_mb = free / (1024 * 1024)  # MB単位
-        
-        if free_mb < required_space_mb:
-            logger.warning(f"ディスク空き容量が少なくなっています: {free_mb:.2f}MB")
-            return False
-        return True
-    except Exception as e:
-        logger.error(f"ディスク容量確認エラー: {e}")
-        return False
-
-def get_windows_error_message(error_code):
-    """
-    Windowsエラーコードから日本語メッセージを取得
-    
-    Args:
-        error_code: Windowsエラーコード
-        
-    Returns:
-        str: 日本語エラーメッセージ
-    """
-    return WINDOWS_ERROR_MESSAGES.get(error_code, f"不明なエラー（コード: {error_code}）")
-
-def is_long_path_enabled():
-    """
-    Windows環境で長いパスサポートが有効か確認する
-    
-    Returns:
-        bool: 長いパスサポートが有効かどうか
-    """
-    # Windows環境でない場合は関係ない
-    if os.name != 'nt':
-        return True
-    
-    # Python 3.6以上の場合、最近のPythonインストーラは長いパスサポートを自動的に有効化
-    try:
-        # テスト用の長いパス
-        long_test_path = 'a' * 260
-        Path(long_test_path)  # エラーが出なければ有効
-        return True
-    except OSError:
-        return False
-
-def normalize_long_path(path):
-    """
-    長いパスをWindows対応形式に正規化する
-    
-    Args:
-        path: 正規化するファイルパス（文字列またはPathオブジェクト）
-        
-    Returns:
-        str: 正規化されたパス（Windowsでは必要に応じて\\?\形式）
-    """
-    # 文字列型に変換
-    path_str = str(path)
-    
-    # Windows環境でない場合はそのまま返す
-    if os.name != 'nt':
-        return path_str
-    
-    # すでに長いパス形式の場合はそのまま
-    if path_str.startswith('\\?\'):
-        return path_str
-    
-    # 絶対パスに変換
-    abs_path = os.path.abspath(path_str)
-    
-    # 長いパスが有効化されていない場合のみプレフィックスを追加
-    # またはパスが200文字以上の場合に対応
-    if not is_long_path_enabled() or len(abs_path) > 200:
-        # UNCパス形式に変換
-        # ネットワークパスの場合は特別な形式が必要
-        if abs_path.startswith('\\'):
-            return '\\\\?\\UNC\\' + abs_path[2:]
-        else:
-            return '\\\\?\\' + abs_path
-    
-    return abs_path
-
-def analyze_os_error(e):
-    """
-    OSエラーを詳細に分析し、具体的な情報を返す
-    
-    Args:
-        e: OSError例外オブジェクト
-        
-    Returns:
-        str: 詳細なエラー情報
-    """
-    error_info = str(e)
-    
-    # Windows固有のエラー情報を取得
-    if os.name == 'nt' and hasattr(e, 'winerror'):
-        win_error_code = e.winerror
-        win_error_msg = get_windows_error_message(win_error_code)
-        error_info = f"Windowsエラー: {win_error_msg} (コード: {win_error_code})"
-    elif hasattr(e, 'errno'):
-        # 一般的なOSエラー
-        errno_code = e.errno
-        if os.name == 'nt':
-            # Windows環境ではwinerrorがない場合もerrnoから推測
-            win_error_msg = get_windows_error_message(errno_code)
-            error_info = f"OSエラー: {win_error_msg} (コード: {errno_code})"
-        else:
-            # Unix系のエラー
-            error_info = f"OSエラー (コード: {errno_code}): {e.strerror if hasattr(e, 'strerror') else str(e)}"
-    
-    # パス長制限のエラーを特定
-    if '\\?\' not in str(e) and ('\u30d1スが長すぎ' in str(e) or 'path too long' in str(e).lower() or 
-            (os.name == 'nt' and hasattr(e, 'winerror') and e.winerror == 206)):
-        error_info += "\n対策: ファイルをルートに近いフォルダに移動してください"
-    
-    return error_info
-
-def create_directory_with_permissions(directory_path):
-    """
-    ディレクトリを安全に作成し、権限エラーの場合は回避策を試みる
-    
-    Args:
-        directory_path: 作成するディレクトリパス（Path オブジェクトまたは文字列）
-    
-    Returns:
-        bool: 成功したかどうか
-    """
-    directory_path = Path(directory_path)
-    
-    # すでに存在する場合は成功
-    if directory_path.exists() and directory_path.is_dir():
-        return True
-    
-    try:
-        # 親ディレクトリを含めて作成
-        directory_path.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"ディレクトリを作成しました: {directory_path}")
-        return True
-    except PermissionError as e:
-        # 権限エラーの場合
-        logger.error(f"権限エラー: ディレクトリ作成できません: {directory_path}")
-        
-        # 親ディレクトリへのアクセス権があるか確認
-        parent = directory_path.parent
-        if parent.exists() and os.access(str(parent), os.W_OK):
-            logger.info(f"親ディレクトリには書き込み権限があります: {parent}")
-        else:
-            logger.warning(f"親ディレクトリへのアクセス権がありません: {parent}")
-        
-        # ユーザーホームディレクトリに代替フォルダを作成する
-        try:
-            home_dir = Path.home()
-            alt_dir = home_dir / "image_resize_output"
-            alt_dir.mkdir(exist_ok=True)
-            logger.warning(f"代替ディレクトリを使用します: {alt_dir}")
-            
-            # 代替ディレクトリへのパスを作成
-            rel_path = str(directory_path).split(os.sep)[-1]  # 最後のディレクトリ名
             new_dir = alt_dir / rel_path
             new_dir.mkdir(exist_ok=True)
             

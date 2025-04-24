@@ -130,29 +130,55 @@ def is_long_path_enabled():
         return False
 
 
-def normalize_long_path(path):
+def normalize_long_path(path, add_prefix=True, remove_prefix=False, normalize=True):
     """
-    長いパスをWindows対応形式に正規化します
+    Windowsの長いパスを処理するためのパス正規化処理
     
     Args:
-        path: 正規化するファイルパス（文字列またはPathオブジェクト）
+        path: パスオブジェクトまたはパス文字列
+        add_prefix: \\?\\プレフィックスを追加するか（Windowsのみ有効）
+        remove_prefix: 既存の\\?\\プレフィックスを削除するか（Windowsのみ有効）
+        normalize: パスを正規化するか（二重スラッシュなどの正規化）
         
     Returns:
-        str: 正規化されたパス（Windowsでは必要に応じて\\\\?\\形式）
+        str: 正規化されたパス（Windowsでは必要に応じて\\?\\u5f62式）
     """
-    # パスを文字列に変換
-    path_str = str(path)
-    
-    # Windowsでなければそのまま返す
-    if os.name != 'nt':
+    try:
+        # パスを文字列に変換
+        path_str = str(path)
+        
+        # Windowsでなければそのまま返す
+        if os.name != 'nt':
+            return path_str
+        
+        # プレフィックスを削除する必要がある場合
+        has_prefix = path_str.startswith('\\\\?\\') 
+        if has_prefix and remove_prefix:
+            path_str = path_str[4:]  # '\\?\\'(4文字)を削除
+        
+        # パスを正規化する必要がある場合
+        if normalize:
+            # 絶対パスに変換
+            # 既に\\?\\プレフィックスがある場合は一時的に削除してから、os.path.abspathで正規化
+            if has_prefix and not remove_prefix:
+                path_str = os.path.abspath(path_str[4:])
+                # プレフィックスを復元
+                path_str = '\\\\?\\' + path_str
+            else:
+                path_str = os.path.abspath(path_str)
+        
+        # プレフィックスを追加する必要がある場合
+        if add_prefix and not has_prefix and not path_str.startswith('\\\\?\\'):
+            # Unicode文字（絵文字など）を含むパスも正しく処理
+            # 絶対パスに変換してからプレフィックスを追加
+            return '\\\\?\\' + (path_str if normalize else os.path.abspath(path_str))
+            
         return path_str
-    
-    # 既にLong Path形式なら処理不要
-    if path_str.startswith('\\\\?\\'):
-        return path_str
-    
-    # 絶対パスに変換してLong Path形式に
-    return '\\\\?\\' + os.path.abspath(path_str)
+        
+    except Exception as e:
+        # パスの正規化中に問題が発生した場合はログに記録し、元のパスを返す
+        logger.error(f"パスの正規化中にエラーが発生しました: {e}")
+        return str(path)  # 元のパスを返す
 
 
 def analyze_os_error(e):
@@ -290,20 +316,46 @@ def get_destination_path(source_path, source_dir, dest_dir):
         Path: 出力先のパス
     """
     try:
-        # 相対パスを計算
-        rel_path = source_path.relative_to(source_dir)
+        # Windows対応：\\?\ プレフィックスを一時的に削除して処理
+        source_path_str = str(source_path)
+        source_dir_str = str(source_dir)
+        
+        is_long_path = False
+        if os.name == 'nt' and source_path_str.startswith('\\\\?\\'):
+            is_long_path = True
+            source_path_str = source_path_str[4:]  # \\?\ を削除
+            source_dir_str = source_dir_str[4:] if source_dir_str.startswith('\\\\?\\') else source_dir_str
+        
+        # 文字列ベースで相対パスを計算（Windows長パス問題を回避）
+        if not source_path_str.startswith(source_dir_str):
+            # 正規化されていない可能性があるので絶対パスで試行
+            abs_source = os.path.abspath(source_path_str)
+            abs_source_dir = os.path.abspath(source_dir_str)
+            
+            if not abs_source.startswith(abs_source_dir):
+                raise ValueError(f"'{source_path_str}' is not in the subpath of '{source_dir_str}'")
+                
+            # 相対パスを手動で計算
+            rel_path_str = abs_source[len(abs_source_dir):].lstrip(os.sep)
+        else:
+            # 直接相対パス計算
+            rel_path_str = source_path_str[len(source_dir_str):].lstrip(os.sep)
         
         # 出力先パスを構築
         dest_path = dest_dir
         
-        # Windows対応のためにパスの各部分を個別に処理
-        for part in rel_path.parts[:-1]:  # ディレクトリ部分
+        # パスを分割して処理
+        path_parts = rel_path_str.split(os.sep)
+        
+        # ディレクトリ部分を処理
+        for part in path_parts[:-1]:  # ファイル名を除く
             safe_part = sanitize_filename(part)
             dest_path = dest_path / safe_part
             
-        # ファイル名部分の処理
-        filename = sanitize_filename(rel_path.name)
-        dest_path = dest_path / filename
+        # ファイル名部分の処理（最後の部分）
+        if path_parts:
+            filename = sanitize_filename(path_parts[-1])
+            dest_path = dest_path / filename
         
         # Windows環境では長いパスの処理
         if os.name == 'nt':
@@ -314,8 +366,9 @@ def get_destination_path(source_path, source_dir, dest_dir):
                 logger.error(f"出力先ディレクトリを作成できませんでした: {parent_dir}")
                 
             # 長いパスの処理
-            dest_path_str = normalize_long_path(dest_path)
-            return Path(dest_path_str)
+            if is_long_path:
+                dest_path_str = normalize_long_path(dest_path)
+                return Path(dest_path_str)
         
         # 出力先ディレクトリを作成
         parent_dir = dest_path.parent
