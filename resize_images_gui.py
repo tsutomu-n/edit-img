@@ -10,14 +10,18 @@ TkEasyGUIを使ったグラフィカルインターフェースで
 
 import os
 import sys
-import threading
 import time
+import signal
+import threading
 import traceback
+import queue
+from datetime import datetime
 from pathlib import Path
 
-import TkEasyGUI as eg
+# TkEasyGUI
+import TkEasyGUI.widgets as eg
 
-# コア機能をインポート
+# カスタム画像処理モジュール
 import resize_core as core
 from resize_core import logger
 
@@ -26,12 +30,13 @@ DEBUG_MODE = True  # Trueにすると詳細なエラー情報を表示
 
 # グローバル変数
 cancel_process = False  # 処理キャンセルフラグ
+update_queue = queue.Queue()  # スレッド間通信用キュー
 
 def process_images_thread(values, window):
     """
     別スレッドで実行する画像処理関数
     """
-    global cancel_process
+    global cancel_process, update_queue
     cancel_process = False
     
     try:
@@ -41,40 +46,28 @@ def process_images_thread(values, window):
         width = int(values['width'])
         quality = int(values['quality'])
     except Exception as e:
-        window['status'].update(f"エラー: パスの正規化に失敗しました - {str(e)}")
-        window['btn_start'].update(disabled=False)
-        window['btn_cancel'].update(disabled=True)
+        # 直接更新する代わりにキューにメッセージを送る
+        update_queue.put(('status', f"エラー: パスの正規化に失敗しました - {str(e)}"))
+        update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_cancel', {'disabled': True}))
         return
     
     # 画像ファイルを検索
     try:
-        window['status'].update("画像ファイルを検索中...")
+        update_queue.put(('status', "画像ファイルを検索中..."))
         image_files = core.find_image_files(source_dir)
         
         if not image_files:
-            window['status'].update("画像ファイルが見つかりませんでした")
-            window['btn_start'].update(disabled=False)
-            window['btn_cancel'].update(disabled=True)
+            update_queue.put(('status', "画像ファイルが見つかりませんでした"))
+            update_queue.put(('btn_start', {'disabled': False}))
+            update_queue.put(('btn_cancel', {'disabled': True}))
             return
-            
+        
         # 進行状況の設定
-        # Sliderコンポーネント用の更新
-        # TkEasyGUI 0.2.80の仕様に合わせて更新方法を修正
-        try:
-            # 特定のバージョンではrangeがサポートされていない可能性がある
-            window['progress'].update(value=0)
-        except Exception as e:
-            logger.warning(f"Sliderの更新メソッドに問題があります: {e}")
-            logger.info("代替の更新方法を試行します")
-            try:
-                # 別の更新方法を試行
-                window['progress'].update(0)
-            except:
-                logger.error("進行表示の更新に失敗しましたが処理は続行します")
-                
-        # 進行状況テキストの更新
-        window['progress_text'].update('0%')
-        window['status'].update(f"処理開始: 合計 {len(image_files)} ファイル")
+        # 直接更新せずにキューに送る
+        update_queue.put(('progress', {'value': 0}))
+        update_queue.put(('progress_text', '0%'))
+        update_queue.put(('status', f"処理開始: 合計 {len(image_files)} ファイル"))
         
         # 処理結果の統計
         processed = 0
@@ -86,7 +79,7 @@ def process_images_thread(values, window):
         # 各画像を処理
         for idx, img_path in enumerate(image_files):
             if cancel_process:
-                window['status'].update("処理がキャンセルされました")
+                update_queue.put(('status', "処理がキャンセルされました"))
                 break
                 
             try:
@@ -95,7 +88,7 @@ def process_images_thread(values, window):
                 
                 # 処理状況を表示
                 file_name = img_path.name
-                window['current_file'].update(f"{idx+1}/{len(image_files)}: {file_name}")
+                update_queue.put(('current_file', f"{idx+1}/{len(image_files)}: {file_name}"))
                 
                 # ファイルサイズを取得
                 file_size_before = img_path.stat().st_size
@@ -113,13 +106,12 @@ def process_images_thread(values, window):
                         file_size_after = dest_path.stat().st_size
                         total_size_after += file_size_after
                         reduction = ((file_size_before - file_size_after) / file_size_before * 100)
-                        window['status'].update(
-                            f"処理: {core.format_file_size(file_size_before)} → "
-                            f"{core.format_file_size(file_size_after)} ({reduction:.1f}% 削減)"
-                        )
+                        status_msg = (f"処理: {core.format_file_size(file_size_before)} → "
+                                     f"{core.format_file_size(file_size_after)} ({reduction:.1f}% 削減)")
+                        update_queue.put(('status', status_msg))
                 else:
                     errors += 1
-                    window['status'].update(f"エラー: 画像処理に失敗しました")
+                    update_queue.put(('status', f"エラー: 画像処理に失敗しました"))
                     
             except Exception as e:
                 # 詳細なエラーメッセージを生成
@@ -135,60 +127,37 @@ def process_images_thread(values, window):
                     suggestions = "ファイル名に無効な文字が含まれています。絵文字や特殊文字を含むファイル名を避けてください。"
                 elif "access denied" in error_detail.lower() or "permission" in error_detail.lower():
                     # アクセス権限の問題
-                    suggestions = "ファイルへのアクセス権限が不足しています。管理者権限で実行するか、別のフォルダを選択してください。"
+                    suggestions = "ファイルまたはフォルダへのアクセス権限がありません。管理者権限で実行してみてください。"
                 elif os.name == 'nt' and ("path too long" in error_detail.lower() or "(206)" in error_detail):
                     # 長いパスの問題（Windows固有）
                     suggestions = "パスが長すぎます。Windowsの長いパス設定を有効にするか、より短いパスを使用してください。"
                 
-                # 詳細なエラーメッセージを表示
-                error_msg = f"エラー: {error_detail}"
-                if suggestions:
-                    error_msg += f"\n提案: {suggestions}"
-                    
-                window['status'].update(error_msg)
-                errors += 1
+                # エラー情報の記録
+                error_trace = traceback.format_exc()
+                logger.error(f"予期せぬエラー: {error_detail}")
+                logger.error(f"トレースバック情報:\n{error_trace}")
                 
-            # 進捗更新
+                # エラーメッセージを結合
+                if suggestions:
+                    error_detail = f"{error_detail}\n\n推奨対策: {suggestions}"
+                
+                # 直接GUI操作しないようキューにエラーを送る
+                update_queue.put(('error_popup', error_detail))
+                update_queue.put(('status', f"エラー: {error_detail[:50]}..."))
+                
+                skipped += 1
+            
+            # 進行状況の更新
             progress_value = idx + 1
             progress_percent = int((progress_value / len(image_files)) * 100)
             
-            # TkEasyGUI 0.2.80との互換性を確保するためのエラーハンドリング
-            try:
-                # 新しいバージョンの更新方法
-                window['progress'].update(value=progress_value)
-                logger.debug(f"進捗更新成功: update(value=progress_value) 方式")
-            except Exception as update_error:
-                logger.debug(f"Slider更新例外 #1: {update_error}")
-                try:
-                    # 代替の更新方法を試行
-                    window['progress'].update(progress_value)
-                    logger.debug(f"進捗更新成功: update(progress_value) 方式")
-                except Exception as alt_error:
-                    logger.debug(f"Slider更新例外 #2: {alt_error}")
-                    try:
-                        # 別の更新方法を試行
-                        window['progress'].update(progress_percent)
-                        logger.debug(f"進捗更新成功: update(progress_percent) 方式")
-                    except Exception as percent_error:
-                        logger.debug(f"Slider更新例外 #3: {percent_error}")
-                        try:
-                            # 最後の手段として直接keyを指定しない方法
-                            window.Element('progress').update(progress_value)
-                            logger.debug(f"進捗更新成功: Element('progress').update() 方式")
-                        except Exception as last_error:
-                            logger.debug(f"Slider更新例外 #4: {last_error}")
-                            logger.warning("すべての進捗更新方法が失敗しましたが、処理は続行します")
+            # 進捗状況をキューに送る
+            update_queue.put(('progress', {'value': progress_value}))
+            update_queue.put(('progress_text', f'{progress_percent}%'))
             
-            # 進行状況テキストの更新
-            window['progress_text'].update(f'{progress_percent}%')
-            
-            # GUI応答性維持のためのイベントチェック
-            event, values = window.read(timeout=10)
-            if event == 'btn_cancel':
-                if self._cancel_requested and not self._cancellation_confirmed:
-                    self._cancellation_confirmed = True
-            # タイムアウトイベントで対応するのでここでの待機は不要
-            # time.sleep(0.01)
+            # カンセルをチェック
+            # 直接window.read()は呼び出さず、メインスレッドでチェックする
+            time.sleep(0.01)  # 他の処理に時間を譲る
             
         # 処理完了
         if not cancel_process:
@@ -286,6 +255,7 @@ def main():
     """
     メイン関数 - GUIアプリケーションを実行します
     """
+    global cancel_process, update_queue
     try:
         # ロガー設定
         log_filename = setup_logger()
@@ -303,34 +273,63 @@ def main():
         
         # レイアウト定義
         layout = [
-        [eg.Text('画像リサイズ・圧縮ツール', font=('', 16))],
-        [eg.Text('入力フォルダ', size=(12, 1)), 
-         eg.Input(settings['source'], key='source', size=(40, 1)), 
-         eg.FolderBrowse('参照')],
-        [eg.Text('出力フォルダ', size=(12, 1)), 
-         eg.Input(settings['dest'], key='dest', size=(40, 1)), 
-         eg.FolderBrowse('参照')],
-        [eg.Text('リサイズ幅', size=(12, 1)), 
-         eg.Slider(range=(300, 3000), default_value=settings['width'], resolution=100, 
-                  orientation='h', size=(40, 15), key='width')],
-        [eg.Text('JPEG品質', size=(12, 1)), 
-         eg.Slider(range=(30, 100), default_value=settings['quality'], 
-                  orientation='h', size=(40, 15), key='quality')],
-        [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
-        [eg.Text('進行状況:'), eg.Slider(range=(0, 100), default_value=0, resolution=1, 
-                  orientation='h', size=(45, 15), key='progress', disabled=True),
-         eg.Text('0%', key='progress_text', size=(5, 1))],
-        [eg.Text('準備完了', key='status')],
-        [eg.Button('実行', key='btn_start'), 
-         eg.Button('キャンセル', key='btn_cancel', disabled=True), 
-         eg.Button('終了')]
-    ]
+            [eg.Text('画像リサイズ・圧縮ツール', font=('', 16))],
+            [eg.Text('入力フォルダ', size=(12, 1)), 
+             eg.Input(settings['source'], key='source', size=(40, 1)), 
+             eg.FolderBrowse('参照')],
+            [eg.Text('出力フォルダ', size=(12, 1)), 
+             eg.Input(settings['dest'], key='dest', size=(40, 1)), 
+             eg.FolderBrowse('参照')],
+            [eg.Text('リサイズ幅', size=(12, 1)), 
+             eg.Slider(range=(300, 3000), default_value=settings['width'], resolution=100, 
+                      orientation='h', size=(40, 15), key='width')],
+            [eg.Text('JPEG品質', size=(12, 1)), 
+             eg.Slider(range=(30, 100), default_value=settings['quality'], 
+                      orientation='h', size=(40, 15), key='quality')],
+            [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
+            [eg.Text('進行状況:'), eg.Slider(range=(0, 100), default_value=0, resolution=1, 
+                      orientation='h', size=(45, 15), key='progress', disabled=True),
+             eg.Text('0%', key='progress_text', size=(5, 1))],
+            [eg.Text('準備完了', key='status')],
+            [eg.Button('実行', key='btn_start'), 
+             eg.Button('キャンセル', key='btn_cancel', disabled=True), 
+             eg.Button('終了')]
+        ]
         
         # ウィンドウ作成
         window = eg.Window('画像リサイズ・圧縮ツール', layout, resizable=True)
+        processing_thread = None
         
         # イベントループ
         while True:
+            # キューからのメッセージを処理（ノンブロッキング）
+            try:
+                while True:  # 全ての待機中メッセージを処理
+                    msg = update_queue.get_nowait()
+                    if msg:
+                        key, value = msg
+                        if key == 'error_popup':
+                            # エラーポップアップを表示
+                            try:
+                                eg.popup_error(value, title="エラー")
+                            except Exception as e:
+                                logger.error(f"GUIエラーポップアップ表示に失敗: {e}")
+                        elif key == 'process_complete':
+                            # 処理完了の場合、スレッドをクリア
+                            if processing_thread and processing_thread.is_alive():
+                                processing_thread.join(0.1)  # スレッド終了を確認
+                            processing_thread = None
+                        elif isinstance(value, dict):
+                            # 追加パラメータ付きの更新
+                            window[key].update(**value)
+                        else:
+                            # 単純な更新
+                            window[key].update(value)
+                    update_queue.task_done()
+            except queue.Empty:
+                pass  # キューが空の場合は無視
+            
+            # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
             
             if event in (eg.WINDOW_CLOSED, '終了'):
@@ -364,14 +363,14 @@ def main():
                 window['status'].update(f"処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
                 
                 # 別スレッドで処理実行
-                threading.Thread(
+                processing_thread = threading.Thread(
                     target=process_images_thread,
                     args=(values, window),
                     daemon=True
-                ).start()
+                )
+                processing_thread.start()
                 
             elif event == 'btn_cancel':
-                global cancel_process
                 cancel_process = True
                 window['status'].update("キャンセル中...")
         
