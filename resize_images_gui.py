@@ -300,9 +300,9 @@ def main():
             'width': 1200,
             'quality': 87
         }
-    
-    # レイアウト定義
-    layout = [
+        
+        # レイアウト定義
+        layout = [
         [eg.Text('画像リサイズ・圧縮ツール', font=('', 16))],
         [eg.Text('入力フォルダ', size=(12, 1)), 
          eg.Input(settings['source'], key='source', size=(40, 1)), 
@@ -325,56 +325,57 @@ def main():
          eg.Button('キャンセル', key='btn_cancel', disabled=True), 
          eg.Button('終了')]
     ]
-    
-    # ウィンドウ作成
-    window = eg.Window('画像リサイズ・圧縮ツール', layout, resizable=True)
-    
-    # イベントループ
-    while True:
-        event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
         
-        if event in (eg.WINDOW_CLOSED, '終了'):
-            break
+        # ウィンドウ作成
+        window = eg.Window('画像リサイズ・圧縮ツール', layout, resizable=True)
+        
+        # イベントループ
+        while True:
+            event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
             
-        elif event == 'btn_start':
-            # 入力値の検証
-            source_dir = values['source']
-            dest_dir = values['dest']
-            
-            if not os.path.exists(source_dir):
-                eg.popup_error(f'入力フォルダが見つかりません: {source_dir}')
-                continue
+            if event in (eg.WINDOW_CLOSED, '終了'):
+                break
                 
-            # 出力フォルダ作成確認
-            if not os.path.exists(dest_dir):
-                if eg.popup_yes_no(f'出力フォルダ {dest_dir} が存在しません。作成しますか？') == 'Yes':
-                    try:
-                        os.makedirs(dest_dir, exist_ok=True)
-                    except Exception as e:
-                        error_trace = traceback.format_exc()
-                        logger.error(f"出力フォルダの作成に失敗: {e}\n{error_trace}")
-                        eg.popup_error(f'フォルダを作成できませんでした: {e}')
-                        continue
-                else:
+            elif event == 'btn_start':
+                # 入力値の検証
+                source_dir = values['source']
+                dest_dir = values['dest']
+                
+                if not os.path.exists(source_dir):
+                    eg.popup_error(f'入力フォルダが見つかりません: {source_dir}')
                     continue
                     
-            # UI状態更新
-            window['btn_start'].update(disabled=True)
-            window['btn_cancel'].update(disabled=False)
-            window['status'].update(f"処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
-            
-            # 別スレッドで処理実行
-            threading.Thread(
-                target=process_images_thread,
-                args=(values, window),
-                daemon=True
-            ).start()
-            
-        elif event == 'btn_cancel':
-            global cancel_process
-            cancel_process = True
-            window['status'].update("キャンセル中...")
-    
+                # 出力フォルダ作成確認
+                if not os.path.exists(dest_dir):
+                    if eg.popup_yes_no(f'出力フォルダ {dest_dir} が存在しません。作成しますか？') == 'Yes':
+                        try:
+                            os.makedirs(dest_dir, exist_ok=True)
+                        except Exception as e:
+                            error_trace = traceback.format_exc()
+                            logger.error(f"出力フォルダの作成に失敗: {e}\n{error_trace}")
+                            eg.popup_error(f'フォルダを作成できませんでした: {e}')
+                            continue
+                    else:
+                        continue
+                        
+                # UI状態更新
+                window['btn_start'].update(disabled=True)
+                window['btn_cancel'].update(disabled=False)
+                window['status'].update(f"処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
+                
+                # 別スレッドで処理実行
+                threading.Thread(
+                    target=process_images_thread,
+                    args=(values, window),
+                    daemon=True
+                ).start()
+                
+            elif event == 'btn_cancel':
+                global cancel_process
+                cancel_process = True
+                window['status'].update("キャンセル中...")
+        
+        # ウィンドウを閉じる
         window.close()
     except Exception as e:
         # 未処理の例外をログに記録
