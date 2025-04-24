@@ -75,7 +75,8 @@ def process_images_thread(values, window, dry_run=False):
     except Exception as e:
         # 直接更新する代わりにキューにメッセージを送る
         update_queue.put(('status', f"エラー: パスの正規化に失敗しました - {str(e)}"))
-        update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_preview', {'disabled': False}))
+        update_queue.put(('btn_execute', {'disabled': False}))
         update_queue.put(('btn_cancel', {'disabled': True}))
         return
     
@@ -86,7 +87,8 @@ def process_images_thread(values, window, dry_run=False):
         
         if not image_files:
             update_queue.put(('status', "画像ファイルが見つかりませんでした"))
-            update_queue.put(('btn_start', {'disabled': False}))
+            update_queue.put(('btn_preview', {'disabled': False}))
+            update_queue.put(('btn_execute', {'disabled': False}))
             update_queue.put(('btn_cancel', {'disabled': True}))
             return
         
@@ -279,12 +281,14 @@ def process_images_thread(values, window, dry_run=False):
         update_queue.put(('process_complete', True))
         
         # ボタンの状態を元に戻すようキューに送る
-        update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_preview', {'disabled': False}))
+        update_queue.put(('btn_execute', {'disabled': False}))
         update_queue.put(('btn_cancel', {'disabled': True}))
         
     finally:
         # UI状態を元に戻すようキューに送る
-        update_queue.put(('btn_start', {'disabled': False}))
+        update_queue.put(('btn_preview', {'disabled': False}))
+        update_queue.put(('btn_execute', {'disabled': False}))
         update_queue.put(('btn_cancel', {'disabled': True}))
         
         # 処理完了時のUIリセット

@@ -744,7 +744,9 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                     
                     # リトライ機構を使って一時ファイル操作
                     def save_temp_image():
-                        resized_img.save(temp_path, format='JPEG', quality=quality)
+                        # RGBモードに変換してから保存
+                        img_to_save = resized_img.convert('RGB')
+                        img_to_save.save(temp_path, format='JPEG', quality=quality)
                         return os.path.getsize(temp_path)
                     
                     try:
@@ -780,14 +782,22 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                     # 拡張子を.jpgに更新
                     dest_path_str = update_extension(dest_path_str, '.jpg')
                     
-                    # JPEGとして保存
-                    if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
-                        save_img.convert('RGB').save(dest_path_str, format='JPEG', 
-                                               quality=optimized_quality,
-                                               exif=img.info['exif'])
-                    else:
-                        save_img.convert('RGB').save(dest_path_str, format='JPEG', 
-                                               quality=optimized_quality)
+                    # RGBモードに変換してからJPEGとして保存
+                    try:
+                        # まずRGBモードに変換
+                        rgb_img = save_img.convert('RGB')
+                        
+                        # JPEGとして保存
+                        if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
+                            rgb_img.save(dest_path_str, format='JPEG', 
+                                        quality=optimized_quality,
+                                        exif=img.info['exif'])
+                        else:
+                            rgb_img.save(dest_path_str, format='JPEG', 
+                                        quality=optimized_quality)
+                    except Exception as e:
+                        logger.error(f"JPEG保存エラー: {e}")
+                        return False, False, None
                     
                 elif format.lower() == 'png':
                     # 拡張子を.pngに更新
