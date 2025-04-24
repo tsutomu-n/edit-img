@@ -13,19 +13,41 @@ __pycache__/
 # テスト関連
 .pytest_cache/
 .coverage
+.tox/
 
 # ログファイル
 *.log
+log/
 process_*.log
 
 # 処理結果レポート
 report.html
 progress.json
 
+# パッケージング関連
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+uv.lock
+
+# IDE関連
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS関連
+.DS_Store
+Thumbs.db
+
 # 画像ファイル（必要に応じてコメントアウト）
 # input/**/*.jpg
 # input/**/*.jpeg
 # input/**/*.png
+# output/
 # output/**/*.jpg
 # output/**/*.jpeg
 # output/**/*.png

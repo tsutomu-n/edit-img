@@ -13,8 +13,8 @@ wheels = [
 
 [[package]]
 name = "edit-img"
-version = "0.1.0"
-source = { virtual = "." }
+version = "0.2.1"
+source = { editable = "." }
 dependencies = [
     { name = "loguru" },
     { name = "pillow" },
@@ -24,10 +24,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "loguru", specifier = ">=0.7.3,<0.8.0" },
     { name = "pillow", specifier = ">=9.0.0" },
-    { name = "tkeasygui", specifier = ">=0.2.80" },
-    { name = "tqdm", specifier = ">=4.60.0" },
+    { name = "tkeasygui", specifier = ">=0.2.20,<0.3.0" },
+    { name = "tqdm", specifier = ">=4.60.0,<5.0.0" },
 ]
 
 [[package]]
@@ -92,15 +92,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/30/23/2f0a3efc4d6a32f3b
 
 [[package]]
 name = "tkeasygui"
-version = "1.0.36"
+version = "0.2.77"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pillow" },
     { name = "pyperclip" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/bd/d571ab3b6627880bda79e140a86d05380cb19a84b7395eca1b3ed6f2a3cd/tkeasygui-1.0.36.tar.gz", hash = "sha256:c3d0d48603aa5fcc0d18307dc2dfb34e5c3000de3deee09cff8625c8a7ef820d", size = 57589 }
+sdist = { url = "https://files.pythonhosted.org/packages/97/8b/b4955aee7bc7d0efe27bedf8dfa28b9dda2b0faed8b60f7e1a7b18c104fb/tkeasygui-0.2.77.tar.gz", hash = "sha256:c8afd8c740c331c4a426fef94627566ca8161533b09930f1ce9998fa9b8fcc0b", size = 42537 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/fc/47fe22785022feea33025602718583afbc8e550fb0b0c9d06d9795e67615/tkeasygui-1.0.36-py3-none-any.whl", hash = "sha256:8baeb9c023280c77ae8ba6e085cfac8804af66065f774e1e9c14a8a46e4a6ba0", size = 55332 },
+    { url = "https://files.pythonhosted.org/packages/1f/b4/abce2e376d6d647c74bccdf9fd8b9bf737631ab662b9b83508c2abf0c832/TkEasyGUI-0.2.77-py3-none-any.whl", hash = "sha256:ea8dd33b4ffa6d50bcee29be27ecb4b259a315ca6554bd877b38ed5dd10653ce", size = 41602 },
 ]
 
 [[package]]
