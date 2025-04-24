@@ -379,7 +379,9 @@ def main():
                     if msg:
                         key, value = msg
                         if key == 'error_popup':
-                            # 処理前の合計サイズ計算
+                            # エラーポップアップの処理
+                            messagebox.showerror("エラー", value)
+            # 処理前の合計サイズ計算
             total_size_before = 0
             
             # メモリ使用量の最適化のため、大量の画像を処理する場合はバッチ処理
