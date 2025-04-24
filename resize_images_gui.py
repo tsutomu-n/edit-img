@@ -156,19 +156,28 @@ def process_images_thread(values, window):
             try:
                 # 新しいバージョンの更新方法
                 window['progress'].update(value=progress_value)
+                logger.debug(f"進捗更新成功: update(value=progress_value) 方式")
             except Exception as update_error:
-                logger.debug(f"Slider更新の例外: {update_error}")
+                logger.debug(f"Slider更新例外 #1: {update_error}")
                 try:
                     # 代替の更新方法を試行
                     window['progress'].update(progress_value)
+                    logger.debug(f"進捗更新成功: update(progress_value) 方式")
                 except Exception as alt_error:
-                    logger.debug(f"代替更新方法の例外: {alt_error}")
+                    logger.debug(f"Slider更新例外 #2: {alt_error}")
                     try:
-                        # 最後の代替手段としてパーセントを設定する
+                        # 別の更新方法を試行
                         window['progress'].update(progress_percent)
-                    except:
-                        # 更新に失敗しても処理を続行
-                        pass
+                        logger.debug(f"進捗更新成功: update(progress_percent) 方式")
+                    except Exception as percent_error:
+                        logger.debug(f"Slider更新例外 #3: {percent_error}")
+                        try:
+                            # 最後の手段として直接keyを指定しない方法
+                            window.Element('progress').update(progress_value)
+                            logger.debug(f"進捗更新成功: Element('progress').update() 方式")
+                        except Exception as last_error:
+                            logger.debug(f"Slider更新例外 #4: {last_error}")
+                            logger.warning("すべての進捗更新方法が失敗しましたが、処理は続行します")
             
             # 進行状況テキストの更新
             window['progress_text'].update(f'{progress_percent}%')
@@ -366,7 +375,7 @@ def main():
             cancel_process = True
             window['status'].update("キャンセル中...")
     
-    window.close()
+        window.close()
     except Exception as e:
         # 未処理の例外をログに記録
         error_trace = traceback.format_exc()

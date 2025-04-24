@@ -132,12 +132,13 @@ def is_long_path_enabled():
 
 def normalize_long_path(path, add_prefix=True, remove_prefix=False, normalize=True):
     """
-    Windowsの長いパスを処理するためのパス正規化処理
+    Windowsの長いパスを処理するためのパス正規化処理。
+    Windowsの260文字制限を回避し、絵文字などのUnicode文字を含むパスも処理します。
     
     Args:
         path: パスオブジェクトまたはパス文字列
-        add_prefix: \\?\\プレフィックスを追加するか（Windowsのみ有効）
-        remove_prefix: 既存の\\?\\プレフィックスを削除するか（Windowsのみ有効）
+        add_prefix: \\?\\u30d7レフィックスを追加するか（Windowsのみ有効）
+        remove_prefix: 既存の\\?\\u30d7レフィックスを削除するか（Windowsのみ有効）
         normalize: パスを正規化するか（二重スラッシュなどの正規化）
         
     Returns:
@@ -146,38 +147,78 @@ def normalize_long_path(path, add_prefix=True, remove_prefix=False, normalize=Tr
     try:
         # パスを文字列に変換
         path_str = str(path)
+        original_path = path_str  # ログ記録用に元のパスを保存
         
         # Windowsでなければそのまま返す
         if os.name != 'nt':
             return path_str
         
-        # プレフィックスを削除する必要がある場合
+        # UNCパス（ネットワークパス）の处理
+        is_unc = path_str.startswith('\\\\')
+        
+        # 既存のプレフィックスを確認
         has_prefix = path_str.startswith('\\\\?\\') 
-        if has_prefix and remove_prefix:
-            path_str = path_str[4:]  # '\\?\\'(4文字)を削除
+        has_unc_prefix = path_str.startswith('\\\\?\\UNC\\')
+        
+        # プレフィックスを削除する必要がある場合
+        if remove_prefix:
+            if has_unc_prefix:
+                # UNCパスのプレフィックスを削除
+                path_str = '\\\\' + path_str[8:]  # '\\?\UNC\\'(8文字)を削除して'\\\\'(2文字)を追加
+                logger.debug(f"UNCパスのプレフィックスを削除: '{original_path}' -> '{path_str}'")
+            elif has_prefix:
+                # 通常のプレフィックスを削除
+                path_str = path_str[4:]  # '\\?\\'(4文字)を削除
+                logger.debug(f"プレフィックスを削除: '{original_path}' -> '{path_str}'")
         
         # パスを正規化する必要がある場合
         if normalize:
-            # 絶対パスに変換
-            # 既に\\?\\プレフィックスがある場合は一時的に削除してから、os.path.abspathで正規化
+            # プレフィックスの有無に応じて正規化
             if has_prefix and not remove_prefix:
-                path_str = os.path.abspath(path_str[4:])
+                # 一時的にプレフィックスを削除して正規化
+                temp_path = path_str[4:] if has_prefix else path_str
+                normalized_path = os.path.abspath(temp_path)
                 # プレフィックスを復元
-                path_str = '\\\\?\\' + path_str
+                path_str = '\\\\?\\' + normalized_path
+                logger.debug(f"プレフィックス付きパスを正規化: '{original_path}' -> '{path_str}'")
             else:
+                # 正規化のみ実行
                 path_str = os.path.abspath(path_str)
+                logger.debug(f"パスを正規化: '{original_path}' -> '{path_str}'")
         
         # プレフィックスを追加する必要がある場合
         if add_prefix and not has_prefix and not path_str.startswith('\\\\?\\'):
-            # Unicode文字（絵文字など）を含むパスも正しく処理
-            # 絶対パスに変換してからプレフィックスを追加
-            return '\\\\?\\' + (path_str if normalize else os.path.abspath(path_str))
+            # パスが無効な場合は正規化
+            norm_path = path_str if normalize else os.path.abspath(path_str)
             
+            if is_unc:
+                # UNCパスの場合は特別な処理が必要
+                # \\で始まるパスは\\を削除してUNCプレフィックスを追加
+                path_str = '\\\\?\\UNC\\' + norm_path[2:]
+                logger.debug(f"UNCパスにプレフィックスを追加: '{original_path}' -> '{path_str}'")
+            else:
+                # 通常のパスにプレフィックスを追加
+                path_str = '\\\\?\\' + norm_path
+                logger.debug(f"パスにプレフィックスを追加: '{original_path}' -> '{path_str}'")
+        
+        # パス长のチェック
+        if len(path_str) > 260 and not (has_prefix or path_str.startswith('\\\\?\\')):
+            logger.warning(f"パスが260文字を超えていますが、\\?\\プレフィックスが付いていません: {path_str}")
+            # プレフィックスが付いていない場合は自動的に追加
+            if is_unc:
+                path_str = '\\\\?\\UNC\\' + path_str[2:]
+            else:
+                path_str = '\\\\?\\' + path_str
+        
         return path_str
         
     except Exception as e:
         # パスの正規化中に問題が発生した場合はログに記録し、元のパスを返す
+        import traceback
+        error_trace = traceback.format_exc()
         logger.error(f"パスの正規化中にエラーが発生しました: {e}")
+        logger.debug(f"トレースバック情報: \n{error_trace}")
+        logger.warning(f"元のパスを返します: {str(path)}")
         return str(path)  # 元のパスを返す
 
 
@@ -273,7 +314,7 @@ def create_directory_with_permissions(directory_path):
 
 def sanitize_filename(filename):
     """
-    ファイル名をWindows互換に変換します
+    ファイル名をWindows互換に変換します。絵文字などの特殊文字も処理します。
     
     Args:
         filename: 元のファイル名
@@ -281,21 +322,58 @@ def sanitize_filename(filename):
     Returns:
         str: 安全なファイル名
     """
-    # Windows禁止文字をアンダースコアに置換
-    unsafe_chars = '<>:"/\\|?*'
-    safe_name = str(filename)
-    
-    for char in unsafe_chars:
-        safe_name = safe_name.replace(char, '_')
-    
-    # 予約語対策（先頭や末尾のスペースとピリオドを削除）
-    safe_name = safe_name.strip(" .")
-    
-    # 空の場合はデフォルト名
-    if not safe_name:
-        safe_name = "unnamed_file"
+    try:
+        # 文字列に変換
+        safe_name = str(filename)
         
-    return safe_name
+        # Windows禁止文字をアンダースコアに置換
+        unsafe_chars = '<>:"/\\|?*\0'
+        for char in unsafe_chars:
+            safe_name = safe_name.replace(char, '_')
+        
+        # コントロール文字をアンダースコアに置換
+        safe_name = ''.join(c if ord(c) >= 32 else '_' for c in safe_name)
+        
+        # Windowsの予約語をチェック
+        reserved_names = ["CON", "PRN", "AUX", "NUL",
+                         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]
+        
+        # ファイル名と拡張子を分ける
+        name_parts = os.path.splitext(safe_name)
+        base_name = name_parts[0]
+        extension = name_parts[1] if len(name_parts) > 1 else ""
+        
+        # 予約語対策
+        if base_name.upper() in reserved_names:
+            base_name = base_name + "_file"
+        
+        # 先頭や末尾のスペースとピリオドを削除
+        base_name = base_name.strip(" .")
+        
+        # 空の場合はデフォルト名
+        if not base_name:
+            base_name = "unnamed_file"
+        
+        # ファイル名が長すぎる場合は切り詰め
+        if len(base_name) > 200:  # Windowsの制限より少なく
+            base_name = base_name[:197] + "..."
+            
+        # 拡張子も簡素化
+        if len(extension) > 10:  # 正常な拡張子はそれより短い
+            extension = extension[:10]
+            
+        # ファイル名を元に戻す
+        safe_name = base_name + extension
+        
+        logger.debug(f"ファイル名を正規化: '{filename}' -> '{safe_name}'")
+        return safe_name
+        
+    except Exception as e:
+        # 例外発生時はログに記録し、デフォルト名を使用
+        logger.error(f"ファイル名の正規化中にエラーが発生しました: {e}")
+        import uuid
+        return f"unnamed_file_{uuid.uuid4().hex[:8]}"
 
 
 def get_system_encoding():
