@@ -709,9 +709,24 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
         # 出力先パスを文字列に変換
         dest_path_str = str(dest_path)
         
-        # 画像を開いて処理
+        # 画像ファイルの有効性を確認
         try:
+            # ファイルの存在とアクセス権限を確認
+            if not os.path.isfile(source_path_str):
+                logger.error(f"ファイルが存在しません: {source_path_str}")
+                return False, False, None
+                
+            if not os.access(source_path_str, os.R_OK):
+                logger.error(f"ファイルに読み取り権限がありません: {source_path_str}")
+                return False, False, None
+            
+            # 画像ファイルを開いてフォーマットを確認
             with Image.open(source_path_str) as img:
+                # 画像フォーマットの確認
+                img_format = img.format
+                if img_format not in ['JPEG', 'PNG', 'WEBP']:
+                    logger.warning(f"サポートされていない画像フォーマット: {img_format}")
+                    # 続行するが警告を記録
                 # 元の画像サイズ
                 original_width, original_height = img.size
                 

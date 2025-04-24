@@ -22,6 +22,7 @@ from pathlib import Path
 import TkEasyGUI as eg
 from TkEasyGUI import widgets
 from TkEasyGUI import dialogs
+from tkinter import messagebox
 
 # カスタム画像処理モジュール
 import resize_core as core
@@ -116,10 +117,14 @@ def process_images_thread(values, window, dry_run=False):
         
         # 各画像を処理
         for idx, img_path in enumerate(image_files):
+            # キャンセルフラグの確認
+            # キャンセル状態を確認するダミーメッセージをキューに送る
+            update_queue.put(('check_cancel', None))
+            
             if cancel_process:
                 update_queue.put(('status', "処理がキャンセルされました"))
                 break
-                
+            
             try:
                 # 出力先パスを取得
                 dest_path = core.get_destination_path(img_path, source_dir, dest_dir)
@@ -128,18 +133,28 @@ def process_images_thread(values, window, dry_run=False):
                 file_name = img_path.name
                 update_queue.put(('current_file', f"{idx+1}/{len(image_files)}: {file_name}"))
                 
+                # 進行状況を更新
+                progress_percent = int((idx / len(image_files)) * 100)
+                update_queue.put(('progress', {'value': progress_percent}))
+                update_queue.put(('progress_text', f'{progress_percent}%'))
+                
                 # ファイルサイズを取得
                 file_size_before = img_path.stat().st_size
                 total_size_before += file_size_before
                 
                 # 画像処理実行
-                success, original_size, estimated_size = core.resize_and_compress_image(
-                    img_path, dest_path, width, quality,
-                    format=format_type,
-                    keep_exif=keep_exif,
-                    balance=balance,
-                    dry_run=dry_run
-                )
+                try:
+                    success, original_size, estimated_size = core.resize_and_compress_image(
+                        img_path, dest_path, width, quality,
+                        format=format_type,
+                        keep_exif=keep_exif,
+                        balance=balance,
+                        dry_run=dry_run
+                    )
+                except Exception as e:
+                    logger.error(f"画像処理中に例外が発生しました: {e}")
+                    errors += 1
+                    continue
                 
                 if success:  # 処理成功
                     processed += 1
@@ -250,6 +265,8 @@ def process_images_thread(values, window, dry_run=False):
                            f"エラー数: {errors}\n"
                            
             if processed > 0:
+                # action_msg変数をここでも定義
+                action_msg = "推定削減量" if dry_run else "削減量"
                 popup_message += f"\n合計{action_msg}: {core.format_file_size(total_size_before)} → {core.format_file_size(total_size_after)}"
                 popup_message += f" ({total_reduction:.1f}% 削減)"
                 
@@ -459,7 +476,7 @@ def main():
                         key, value = msg
                         if key == 'error_popup':
                             # エラーポップアップの処理
-                            messagebox.showerror("エラー", value)
+                            eg.popup_error(value, title="エラー")
                         elif key == 'popup':
                             # 通常のポップアップを表示
                             try:
