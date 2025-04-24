@@ -47,6 +47,23 @@ def process_images_thread(values, window):
         dest_dir = Path(core.normalize_long_path(values['dest'], add_prefix=False, remove_prefix=True))
         width = int(values['width'])
         quality = int(values['quality'])
+        
+        # 新しいパラメータの取得
+        # 出力形式の取得
+        if values.get('format_jpeg', True):
+            format_type = 'jpeg'
+        elif values.get('format_png', False):
+            format_type = 'png'
+        elif values.get('format_webp', False):
+            format_type = 'webp'
+        else:
+            format_type = 'jpeg'  # デフォルト
+        
+        # 圧縮バランスの取得
+        balance = int(values.get('balance', 5))
+        
+        # EXIFメタデータオプション
+        keep_exif = values.get('keep_exif', True)
     except Exception as e:
         # 直接更新する代わりにキューにメッセージを送る
         update_queue.put(('status', f"エラー: パスの正規化に失敗しました - {str(e)}"))
@@ -69,7 +86,16 @@ def process_images_thread(values, window):
         # 直接更新せずにキューに送る
         update_queue.put(('progress', {'value': 0}))
         update_queue.put(('progress_text', '0%'))
-        update_queue.put(('status', f"処理開始: 合計 {len(image_files)} ファイル"))
+        # 詳細な処理説明を表示
+        format_name = {'jpeg': 'JPEG', 'png': 'PNG', 'webp': 'WebP'}[format_type]
+        exif_status = '保持する' if keep_exif else '削除する'
+        balance_desc = '圧縮優先' if balance < 4 else '標準' if balance < 7 else '品質優先'
+        
+        status_msg = f"処理開始: 合計 {len(image_files)} ファイル\n" \
+                   f"出力形式: {format_name}, 幅: {width}px, 品質: {quality}%, " \
+                   f"バランス: {balance} ({balance_desc}), EXIF: {exif_status}"
+        
+        update_queue.put(('status', status_msg))
         
         # 処理結果の統計
         processed = 0
@@ -98,7 +124,11 @@ def process_images_thread(values, window):
                 
                 # 画像処理実行
                 result = core.resize_and_compress_image(
-                    img_path, dest_path, width, quality, False
+                    img_path, dest_path, width, quality,
+                    format=format_type,
+                    keep_exif=keep_exif,
+                    balance=balance,
+                    dry_run=False
                 )
                 
                 if result[0]:  # 処理成功
@@ -291,7 +321,10 @@ def main():
             'source': './input',
             'dest': './output',
             'width': 1200,
-            'quality': 87
+            'quality': 87,
+            'format': 'jpeg',
+            'balance': 5,
+            'keep_exif': True
         }
         
         # レイアウト定義
@@ -309,6 +342,20 @@ def main():
             [eg.Text('JPEG品質', size=(12, 1)), 
              eg.Slider(range=(30, 100), default_value=settings['quality'], 
                       orientation='h', width=40, key='quality')],
+            
+            # 出力形式選択
+            [eg.Text('出力形式:', size=(12, 1)),
+             eg.Radio('JPEG', 'format', key='format_jpeg', default=settings['format']=='jpeg'),
+             eg.Radio('PNG', 'format', key='format_png', default=settings['format']=='png'),
+             eg.Radio('WebP', 'format', key='format_webp', default=settings['format']=='webp')],
+             
+            # 圧縮と品質のバランス調整
+            [eg.Text('圧縮バランス:', size=(12, 1)), 
+             eg.Slider(range=(1, 10), default_value=settings['balance'], orientation='h', width=40, 
+                      key='balance', tooltip='1=最高圧縮率、ファイルサイズ優先 / 10=最高品質、画質優先')],
+            
+            # メタデータオプション
+            [eg.Text('', size=(12, 1)), eg.Checkbox('EXIFメタデータを保持', default=settings['keep_exif'], key='keep_exif')],
             [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
             [eg.Text('進行状況:'), eg.Slider(range=(0, 100), default_value=0, resolution=1, 
                       orientation='h', width=45, key='progress', disabled=True),

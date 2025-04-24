@@ -532,18 +532,22 @@ def find_image_files(source_dir):
         return []
 
 
-def process_image(source_path, dest_dir, target_width, quality):
+def resize_and_compress_image(source_path, dest_path, target_width, quality, format='jpeg', keep_exif=True, balance=5, dry_run=False):
     """
-    画像を処理し、結果を返します
+    画像をリサイズして圧縮します
     
     Args:
-        source_path: 元画像パス
-        dest_dir: 出力先ディレクトリ
-        target_width: 目標の幅
-        quality: JPEG品質 (1-100)
+        source_path: 元の画像ファイルパス (Path)
+        dest_path: 出力先ファイルパス (Path)
+        target_width: 目標の幅 (ピクセル)
+        quality: 圧縮品質 (1-100)
+        format: 出力形式 ('jpeg', 'png', 'webp')
+        keep_exif: EXIFメタデータを保持するか
+        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質)
+        dry_run: 実際の処理を行わずサイズ見積もりのみ実施
         
     Returns:
-        tuple: (成功したか, 元サイズ, 新サイズ, 削減率)
+        tuple: (成功したか, 元のサイズを維持したか, 見積もりサイズ)
     """
     try:
         # パスの正規化にリトライ機構を使用
@@ -626,23 +630,53 @@ def process_image(source_path, dest_dir, target_width, quality):
                                 os.remove(temp_path)
                         except Exception as e:
                             logger.debug(f"一時ファイルの削除に失敗: {e}")
+            
+            # ドライランの場合は実際の保存は行わない
+            if not dry_run:
+                # ディレクトリが存在するか確認
+                if not os.path.exists(os.path.dirname(dest_path_str)):
+                    os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
                 
-                # ドライランの場合は実際の保存は行わない
-                if not dry_run:
-                    # ディレクトリが存在するか確認
-                    if not os.path.exists(os.path.dirname(dest_path_str)):
-                        os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
+                # バランス値に基づいて最適化パラメータを調整
+                optimized_quality = adjust_quality_by_balance(quality, balance, format)
+                
+                # 出力形式に応じた処理
+                # 保存する画像を選択
+                if not keep_original:
+                    save_img = resized_img
+                else:
+                    save_img = img
+                
+                if format.lower() == 'jpeg':
+                    # 拡張子を.jpgに更新
+                    dest_path_str = update_extension(dest_path_str, '.jpg')
                     
-                    # JPEG形式で保存
-                    if not keep_original:
-                        resized_img.save(dest_path_str, format='JPEG', quality=quality)
+                    # JPEGとして保存
+                    if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
+                        save_img.convert('RGB').save(dest_path_str, format='JPEG', 
+                                               quality=optimized_quality,
+                                               exif=img.info['exif'])
                     else:
-                        # 元のサイズを維持する場合はコピーのみ
-                        if source_path.suffix.lower() in ['.jpg', '.jpeg']:
-                            img.save(dest_path_str, format='JPEG', quality=quality)
-                        else:
-                            # PNG等はJPEGに変換
-                            img.convert('RGB').save(dest_path_str, format='JPEG', quality=quality)
+                        save_img.convert('RGB').save(dest_path_str, format='JPEG', 
+                                               quality=optimized_quality)
+                    
+                elif format.lower() == 'png':
+                    # 拡張子を.pngに更新
+                    dest_path_str = update_extension(dest_path_str, '.png')
+                    
+                    # PNGはqualityではなくcompressionレベルを使用
+                    compression = int(9 - (optimized_quality / 10))  # 0-9の範囲に変換（9が最高圧縮）
+                    compression = max(0, min(9, compression))  # 範囲を確保
+                    
+                    # PNGとして保存
+                    save_img.save(dest_path_str, format='PNG', compress_level=compression)
+                    
+                elif format.lower() == 'webp':
+                    # 拡張子を.webpに更新
+                    dest_path_str = update_extension(dest_path_str, '.webp')
+                    
+                    # WebPはqualityをそのまま使用できる
+                    save_img.save(dest_path_str, format='WEBP', quality=optimized_quality)
                 
                 return True, keep_original, estimated_size
                 
@@ -664,6 +698,69 @@ def process_image(source_path, dest_dir, target_width, quality):
         # その他の予期せぬエラー
         logger.error(f"予期せぬエラー: {e}")
         return False, False, None
+
+
+def update_extension(file_path, new_ext):
+    """
+    ファイルパスの拡張子を更新します
+    
+    Args:
+        file_path: 元のファイルパス
+        new_ext: 新しい拡張子 (ドット付き、例: '.jpg')
+        
+    Returns:
+        str: 拡張子を更新したパス
+    """
+    path_obj = Path(file_path)
+    stem = path_obj.stem
+    parent = path_obj.parent
+    
+    # 新しいパスを作成
+    new_path = parent / f"{stem}{new_ext}"
+    
+    return str(new_path)
+
+
+def adjust_quality_by_balance(quality, balance, format):
+    """
+    圧縮と品質のバランスに基づいて品質パラメータを調整します
+    
+    Args:
+        quality: 元の品質値 (1-100)
+        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質)
+        format: 出力形式 ('jpeg', 'png', 'webp')
+        
+    Returns:
+        int: 調整後の品質値
+    """
+    # バランス値を正規化 (1-10 → 0.0-1.0)
+    balance_factor = (balance - 1) / 9.0
+    
+    # 形式ごとの品質調整
+    if format.lower() == 'jpeg':
+        # JPEGの場合: バランス値が高いほど高品質
+        # balance = 1 (最高圧縮) → quality * 0.7
+        # balance = 10 (最高品質) → quality * 1.2 (上限100)
+        adjustment = 0.7 + (balance_factor * 0.5)
+        new_quality = int(quality * adjustment)
+        
+    elif format.lower() == 'png':
+        # PNGの場合: 圧縮レベルは別関数で処理するのでそのまま返す
+        new_quality = quality
+        
+    elif format.lower() == 'webp':
+        # WebPの場合: バランスに基づく調整
+        # balance = 1 (最高圧縮) → quality * 0.6
+        # balance = 10 (最高品質) → quality * 1.1 (上限100)
+        adjustment = 0.6 + (balance_factor * 0.5)
+        new_quality = int(quality * adjustment)
+    
+    else:
+        # 未対応の形式はそのまま返す
+        new_quality = quality
+    
+    # 範囲の正規化 (1-100)
+    return max(1, min(100, new_quality))
 
 
 def format_file_size(size_in_bytes):
