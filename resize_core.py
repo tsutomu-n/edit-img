@@ -431,107 +431,135 @@ def get_destination_path(source_path, source_dir, dest_dir):
     Returns:
         Path: 出力先のパス
     """
-    # 全ての変数を最初に定義してスコープの問題を回避
-    source_path_str = ""
-    source_dir_str = ""
-    dest_path = None
-    safe_name = ""
-    rel_path_str = ""
-    is_long_path = False
-    path_parts = []
+    # 出力先のパスを保持する変数を初期化
+    # どのケースでもデフォルト値を持つようにする
+    result_path = None
     
-    # メイン処理部分
+    # dest_dirを安全に取得
+    dest_dir_str = ""
+    if dest_dir is not None:
+        try:
+            dest_dir_str = str(dest_dir)
+            # 万が一で空文字列ならデフォルト値を使用
+            if not dest_dir_str:
+                dest_dir_str = "./output"
+        except Exception:
+            dest_dir_str = "./output"
+    else:
+        dest_dir_str = "./output"
+    
+    # source_pathを安全に取得
+    source_path_str = ""
+    filename = "output_file.jpg"  # デフォルトファイル名
+    if source_path is not None:
+        try:
+            source_path_str = str(source_path)
+            filename = os.path.basename(source_path_str)
+        except Exception:
+            pass
+    
+    # source_dirを安全に取得
+    source_dir_str = ""
+    if source_dir is not None:
+        try:
+            source_dir_str = str(source_dir)
+        except Exception:
+            pass
+    
+    # メイン処理ブロック
     try:
-        # 入力値の安全な文字列化
-        source_path_str = str(source_path)
-        source_dir_str = str(source_dir)
-        dest_dir_str = str(dest_dir)
-        
         # Windowsの長いパス処理
+        is_long_path = False
         if os.name == 'nt' and source_path_str.startswith('\\\\?\\'):
             is_long_path = True
             source_path_str = source_path_str[4:]
             source_dir_str = source_dir_str[4:] if source_dir_str.startswith('\\\\?\\') else source_dir_str
         
         # 相対パスの計算
-        if not source_path_str.startswith(source_dir_str):
-            # 絶対パスで試行
-            abs_source = os.path.abspath(source_path_str)
-            abs_source_dir = os.path.abspath(source_dir_str)
+        rel_path_str = ""
+        if source_path_str and source_dir_str:
+            if not source_path_str.startswith(source_dir_str):
+                # 絶対パスで試行
+                try:
+                    abs_source = os.path.abspath(source_path_str)
+                    abs_source_dir = os.path.abspath(source_dir_str)
+                    
+                    if abs_source.startswith(abs_source_dir):
+                        rel_path_str = abs_source[len(abs_source_dir):].lstrip(os.sep)
+                except Exception:
+                    # 失敗した場合は相対パスなし
+                    rel_path_str = ""
+            else:
+                # 直接相対パス計算
+                rel_path_str = source_path_str[len(source_dir_str):].lstrip(os.sep)
+        
+        # 相対パスが存在する場合
+        if rel_path_str:
+            # パス部分の分割
+            path_parts = rel_path_str.split(os.sep)
             
-            if not abs_source.startswith(abs_source_dir):
-                # パスが一致しない場合はファイル名のみを使用
-                safe_name = sanitize_filename(os.path.basename(source_path_str))
-                return Path(dest_dir_str) / safe_name
+            # 出力先パスの構築
+            result_path = Path(dest_dir_str)
             
-            rel_path_str = abs_source[len(abs_source_dir):].lstrip(os.sep)
-        else:
-            rel_path_str = source_path_str[len(source_dir_str):].lstrip(os.sep)
-        
-        # パス部分の分割
-        path_parts = rel_path_str.split(os.sep)
-        
-        # 出力先パスの構築
-        dest_path = Path(dest_dir_str)
-        
-        # ディレクトリ部分の処理
-        if len(path_parts) > 1:
-            for part in path_parts[:-1]:
-                part_safe = sanitize_filename(part)
-                dest_path = dest_path / part_safe
+            # ディレクトリ部分の処理
+            if len(path_parts) > 1:
+                for part in path_parts[:-1]:
+                    try:
+                        part_safe = sanitize_filename(part)
+                        result_path = result_path / part_safe
+                    except Exception:
+                        # 失敗した場合はスキップして次のディレクトリ部分へ
+                        continue
                 
-            # ディレクトリ作成
-            try:
-                parent_dir = dest_path
-                success, _ = create_directory_with_permissions(parent_dir)
-                if not success:
-                    logger.warning(f"出力先ディレクトリを作成できませんでした: {parent_dir}")
-            except Exception as dir_err:
-                logger.warning(f"ディレクトリ作成エラー: {dir_err}")
-        
-        # ファイル名部分の処理
-        if path_parts:
-            filename = sanitize_filename(path_parts[-1])
-            dest_path = dest_path / filename
+                # ディレクトリ作成
+                try:
+                    create_directory_with_permissions(result_path)
+                except Exception as dir_err:
+                    logger.debug(f"ディレクトリ作成エラーは無視します: {dir_err}")
+            
+            # ファイル名部分の処理
+            if path_parts:
+                try:
+                    filename = sanitize_filename(path_parts[-1])
+                    result_path = result_path / filename
+                except Exception:
+                    # ファイル名部分の処理に失敗した場合は元のファイル名を使用
+                    result_path = result_path / filename
         else:
-            # パスが空の場合は元のファイル名を使用
-            safe_name = sanitize_filename(os.path.basename(source_path_str))
-            dest_path = Path(dest_dir_str) / safe_name
+            # 相対パスが存在しない場合、ファイル名のみ使用
+            try:
+                safe_name = sanitize_filename(filename)
+                result_path = Path(dest_dir_str) / safe_name
+            except Exception:
+                # 安全なファイル名の生成に失敗した場合はデフォルト名を使用
+                result_path = Path(dest_dir_str) / "output_file.jpg"
         
         # Windowsの長いパス処理
-        if os.name == 'nt' and is_long_path:
+        if os.name == 'nt' and is_long_path and result_path:
             try:
-                dest_path_str = normalize_long_path(str(dest_path))
-                return Path(dest_path_str)
-            except Exception as path_err:
-                logger.warning(f"長いパスの正規化エラー: {path_err}")
-        
-        return dest_path
-        
+                dest_path_str = normalize_long_path(str(result_path))
+                result_path = Path(dest_path_str)
+            except Exception:
+                # 長いパスの正規化に失敗した場合は元のパスを使用
+                pass
+    
     except Exception as e:
+        # メイン処理でエラーが発生した場合
         logger.error(f"出力先パス生成エラー: {e}")
-        
-        # 全てのエラー処理はここで行う
+    
+    # 最終的なチェックと結果返却
+    if result_path is None:
+        # メイン処理に失敗した場合の最終手段
         try:
-            # 元のファイル名を取得
-            if hasattr(source_path, 'name'):
-                filename = str(source_path.name)
-            else:
-                filename = os.path.basename(str(source_path))
-                
-            # 安全なファイル名に変換
+            # 安全なファイル名を生成
             safe_name = sanitize_filename(filename)
-            
-            # 出力先ディレクトリと結合
-            if hasattr(dest_dir, '__truediv__'):
-                return dest_dir / safe_name
-            else:
-                return Path(str(dest_dir)) / safe_name
-                
-        except Exception as last_error:
-            logger.error(f"最終的なエラー: {last_error}")
-            # 最後の手段として、ファイル名のみを返す
-            return Path("output_file.jpg")
+            result_path = Path(dest_dir_str) / safe_name
+        except Exception:
+            # 本当に最後の手段として、デフォルトから生成
+            result_path = Path("./output/output_file.jpg")
+    
+    # 結果返却
+    return result_path
 
 
 def find_image_files(source_dir):
@@ -582,6 +610,16 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
     Returns:
         tuple: (成功したか, 元のサイズを維持したか, 見積もりサイズ)
     """
+    # 変数の初期化 - スコープ問題防止のため先に定義
+    source_path_str = ""
+    file_size_before = 0
+    dest_path_str = ""
+    keep_original = False
+    estimated_size = None
+    resized_img = None
+    img = None
+    save_img = None
+    
     try:
         # パスの正規化にリトライ機構を使用
         def normalize_path_with_retry(path):
@@ -604,15 +642,16 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
             
         file_size_before = retry_on_file_error(get_size, source_path_str, max_retries=3, retry_delay=0.2)
 
-        # 出力先ディレクトリを作成
-        dest_path = get_destination_path(source_path, source_path.parent, dest_dir)
+        # 出力先ディレクトリの安全な取得 (dest_path引数を使用)
         dest_dir = Path(dest_path).parent
         success, created_dir = create_directory_with_permissions(dest_dir)
         if not success:
             logger.error(f"出力先ディレクトリを作成できませんでした: {dest_dir}")
-            return False, None, None, None
             return False, False, None
 
+        # 出力先パスを文字列に変換
+        dest_path_str = str(dest_path)
+        
         # 画像を開いて処理
         try:
             with Image.open(source_path_str) as img:
@@ -663,22 +702,22 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                                 os.remove(temp_path)
                         except Exception as e:
                             logger.debug(f"一時ファイルの削除に失敗: {e}")
-            
-            # ドライランの場合は実際の保存は行わない
-            if not dry_run:
-                # ディレクトリが存在するか確認
-                if not os.path.exists(os.path.dirname(dest_path_str)):
-                    os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
                 
-                # バランス値に基づいて最適化パラメータを調整
-                optimized_quality = adjust_quality_by_balance(quality, balance, format)
-                
-                # 出力形式に応じた処理
-                # 保存する画像を選択
-                if not keep_original:
-                    save_img = resized_img
-                else:
-                    save_img = img
+                # ドライランの場合は実際の保存は行わない
+                if not dry_run:
+                    # ディレクトリが存在するか確認
+                    if not os.path.exists(os.path.dirname(dest_path_str)):
+                        os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
+                    
+                    # バランス値に基づいて最適化パラメータを調整
+                    optimized_quality = adjust_quality_by_balance(quality, balance, format)
+                    
+                    # 出力形式に応じた処理
+                    # 保存する画像を選択
+                    if not keep_original:
+                        save_img = resized_img
+                    else:
+                        save_img = img
                 
                 if format.lower() == 'jpeg':
                     # 拡張子を.jpgに更新
