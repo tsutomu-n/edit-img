@@ -411,27 +411,8 @@ def main():
                 # キューが空の場合、処理を続行
                 pass
                 
-            # 処理前の合計サイズ計算
-            total_size_before = 0
-            
-            # メモリ使用量の最適化のため、大量の画像を処理する場合はバッチ処理
-            batch_size = 10  # 一度に処理するファイル数
-            for i in range(0, len(image_files), batch_size):
-                batch = image_files[i:i+batch_size]
-                for img_path in batch:
-                    try:
-                        # リトライ機構を利用
-                        def get_size(path):
-                            return os.path.getsize(path)
-                            
-                        size = core.retry_on_file_error(get_size, img_path, max_retries=2, retry_delay=0.1)
-                        total_size_before += size
-                    except Exception as e:
-                        logger.error(f"ファイルサイズ取得エラー: {e} - {img_path}")
-                
-                # 定期的にガベージコレクションを実行
-                import gc
-                gc.collect()
+            # メインスレッド側ではファイルサイズ計算は行わない
+            # ファイルサイズ計算はprocess_images_thread内で行う
             
             # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
