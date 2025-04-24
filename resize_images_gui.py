@@ -12,12 +12,17 @@ import os
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import TkEasyGUI as eg
 
 # コア機能をインポート
 import resize_core as core
+from resize_core import logger
+
+# デバッグモード設定
+DEBUG_MODE = True  # Trueにすると詳細なエラー情報を表示
 
 # グローバル変数
 cancel_process = False  # 処理キャンセルフラグ
@@ -52,10 +57,22 @@ def process_images_thread(values, window):
             window['btn_cancel'].update(disabled=True)
             return
             
-        # プログレスバーの設定
+        # 進行状況の設定
         # Sliderコンポーネント用の更新
-        window['progress'].update(range=(0, len(image_files)))
-        window['progress'].update(value=0)
+        # TkEasyGUI 0.2.80の仕様に合わせて更新方法を修正
+        try:
+            # 特定のバージョンではrangeがサポートされていない可能性がある
+            window['progress'].update(value=0)
+        except Exception as e:
+            logger.warning(f"Sliderの更新メソッドに問題があります: {e}")
+            logger.info("代替の更新方法を試行します")
+            try:
+                # 別の更新方法を試行
+                window['progress'].update(0)
+            except:
+                logger.error("進行表示の更新に失敗しましたが処理は続行します")
+                
+        # 進行状況テキストの更新
         window['progress_text'].update('0%')
         window['status'].update(f"処理開始: 合計 {len(image_files)} ファイル")
         
@@ -134,7 +151,26 @@ def process_images_thread(values, window):
             # 進捗更新
             progress_value = idx + 1
             progress_percent = int((progress_value / len(image_files)) * 100)
-            window['progress'].update(value=progress_value)
+            
+            # TkEasyGUI 0.2.80との互換性を確保するためのエラーハンドリング
+            try:
+                # 新しいバージョンの更新方法
+                window['progress'].update(value=progress_value)
+            except Exception as update_error:
+                logger.debug(f"Slider更新の例外: {update_error}")
+                try:
+                    # 代替の更新方法を試行
+                    window['progress'].update(progress_value)
+                except Exception as alt_error:
+                    logger.debug(f"代替更新方法の例外: {alt_error}")
+                    try:
+                        # 最後の代替手段としてパーセントを設定する
+                        window['progress'].update(progress_percent)
+                    except:
+                        # 更新に失敗しても処理を続行
+                        pass
+            
+            # 進行状況テキストの更新
             window['progress_text'].update(f'{progress_percent}%')
             
             # GUI応答性維持のためのイベントチェック
@@ -182,7 +218,26 @@ def process_images_thread(values, window):
             
             eg.popup(popup_message, title="処理結果")
     except Exception as e:
-        window['status'].update(f"予期せぬエラー: {str(e)}")
+        # エラー内容の詳細なログ記録
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"予期せぬエラー: {error_msg}")
+        logger.error(f"トレースバック情報: \n{error_trace}")
+        
+        # デバッグモードの場合は詳細情報を表示
+        if DEBUG_MODE:
+            error_detail = f"{error_msg}\n\n{error_trace if error_trace else ''}" 
+            window['status'].update(f"予期せぬエラー\n(詳細はログファイルを確認): {error_detail}")
+            # エラーダイアログ表示
+            eg.popup_error(f"予期せぬエラーが発生しました\n\n{error_detail}", title="エラー")
+        else:
+            window['status'].update(f"予期せぬエラー: {error_msg}\n(詳細はログファイルを確認)")
+            # シンプルなエラーダイアログ
+            eg.popup_error(f"予期せぬエラーが発生しました: {error_msg}", title="エラー")
+        
+        # ボタンの状態を元に戻す
+        window['btn_start'].update(disabled=False)
+        window['btn_cancel'].update(disabled=True)
         
     finally:
         # UI状態を元に戻す
@@ -190,17 +245,52 @@ def process_images_thread(values, window):
         window['btn_cancel'].update(disabled=True)
 
 
+def setup_logger():
+    """
+    ロガーの設定を行う関数
+    """
+    # デフォルトのロガー設定を削除
+    logger.remove()
+    
+    # デバッグモードの場合は詳細情報を出力
+    log_level = "DEBUG" if DEBUG_MODE else "INFO"
+    
+    # 画面出力用のロガー設定
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+        level=log_level
+    )
+    
+    # ファイル出力用のロガー設定
+    from datetime import datetime
+    log_filename = f"process_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.log"
+    logger.add(
+        log_filename,
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        level="DEBUG"  # ファイルには常に詳細情報を記録
+    )
+    
+    return log_filename
+
 def main():
     """
     メイン関数 - GUIアプリケーションを実行します
     """
-    # デフォルト設定
-    settings = {
-        'source': './input',
-        'dest': './output',
-        'width': 1200,
-        'quality': 87
-    }
+    try:
+        # ロガー設定
+        log_filename = setup_logger()
+        logger.info(f"GUIモードで起動しました。ログファイル: {log_filename}")
+        logger.info(f"Pythonバージョン: {sys.version}")
+        logger.info(f"OS情報: {os.name} - {sys.platform}")
+        
+        # デフォルト設定
+        settings = {
+            'source': './input',
+            'dest': './output',
+            'width': 1200,
+            'quality': 87
+        }
     
     # レイアウト定義
     layout = [
@@ -252,6 +342,8 @@ def main():
                     try:
                         os.makedirs(dest_dir, exist_ok=True)
                     except Exception as e:
+                        error_trace = traceback.format_exc()
+                        logger.error(f"出力フォルダの作成に失敗: {e}\n{error_trace}")
                         eg.popup_error(f'フォルダを作成できませんでした: {e}')
                         continue
                 else:
@@ -275,6 +367,26 @@ def main():
             window['status'].update("キャンセル中...")
     
     window.close()
+    except Exception as e:
+        # 未処理の例外をログに記録
+        error_trace = traceback.format_exc()
+        logger.critical(f"メイン関数で予期せぬエラーが発生しました: {e}")
+        logger.critical(f"トレースバック情報:\n{error_trace}")
+        
+        # デバッグモードの場合は推奨対策も表示
+        error_msg = f"予期せぬエラーが発生しました: {e}"
+        if DEBUG_MODE:
+            error_msg += f"\n\nトレースバック情報:\n{error_trace}"
+            error_msg += "\n\n推奨対策:\n1. ログファイルを確認してください\n2. Python環境が正しく設定されているか確認してください"
+        
+        # エラーダイアログ表示
+        try:
+            eg.popup_error(error_msg, title="エラー")
+        except:
+            # GUIが使えない場合は標準出力
+            print(f"\nエラー: {error_msg}")
+        
+        sys.exit(1)  # エラー終了
 
 if __name__ == '__main__':
     main()

@@ -18,10 +18,13 @@ import signal
 from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
+from loguru import logger
 
 # コア機能をインポート
 import resize_core as core
-from resize_core import logger
+
+# デバッグモード設定
+DEBUG_MODE = False  # コマンドライン引数で上書き可能
 
 # シグナルハンドラー変数
 interrupt_requested = False
@@ -81,23 +84,40 @@ def parse_args():
         "--check-disk", action="store_true",
         help="処理前にディスク容量を確認する"
     )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="デバッグモードを有効にする（エラー時に詳細な情報を表示）"
+    )
     
     return parser.parse_args()
 
-# ログ設定
-logger.remove()  # デフォルト設定を削除
-logger.add(
-    sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-    level="INFO"
-)
-logger.add(
-    "process_{time}.log",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {function}: {message}",
-    rotation="1 day",
-    level="DEBUG"
-)
-
+def setup_logger(verbose=False):
+    """
+    ロガーの設定を行う関数
+    """
+    # デフォルトのロガー設定を削除
+    logger.remove()
+    
+    # ログレベルの設定
+    log_level = "DEBUG" if verbose or DEBUG_MODE else "INFO"
+    
+    # 画面出力用のロガー設定
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+        level=log_level
+    )
+    
+    # ファイル出力用のロガー設定
+    from datetime import datetime
+    log_filename = f"process_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.log"
+    logger.add(
+        log_filename,
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        level="DEBUG"  # ファイルには常に詳細情報を記録
+    )
+    
+    return log_filename
 
 def get_directory_size(path):
     """ディレクトリの合計サイズを取得"""
@@ -127,174 +147,6 @@ def calculate_reduction_rate(source_dir, dest_dir):
     
     return (source_size - dest_size) / source_size * 100
 
-            new_dir = alt_dir / rel_path
-            new_dir.mkdir(exist_ok=True)
-            
-            logger.info(f"代替ディレクトリを作成しました: {new_dir}")
-            return True
-        except Exception as alt_err:
-            logger.error(f"代替ディレクトリ作成にも失敗しました: {alt_err}")
-            return False
-    except FileExistsError:
-        # ファイルとして同名のものが存在する場合（正常な状態ではフォルダのはず）
-        logger.error(f"同名のファイルが存在します。フォルダではありません: {directory_path}")
-        
-        # 代替名を試みる
-        try:
-            alt_dir_name = f"{directory_path}_folder"
-            Path(alt_dir_name).mkdir(parents=True, exist_ok=True)
-            logger.warning(f"代替名でディレクトリを作成しました: {alt_dir_name}")
-            return True
-        except Exception as rename_err:
-            logger.error(f"代替名のディレクトリ作成にも失敗しました: {rename_err}")
-            return False
-    except Exception as e:
-        logger.error(f"ディレクトリ作成中に不明なエラーが発生しました: {e}")
-        return False
-
-def save_progress(processed_files, remaining_files, output_file="progress.json"):
-    """処理の進捗状況を保存"""
-    data = {
-        "timestamp": datetime.now().isoformat(),
-        "processed": [str(f) for f in processed_files],
-        "remaining": [str(f) for f in remaining_files]
-    }
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.info(f"進捗を保存しました: {output_file}")
-
-def load_progress(input_file="progress.json"):
-    """保存された進捗を読み込み"""
-    if not os.path.exists(input_file):
-        return [], []
-    
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        logger.info(f"前回の進捗を読み込みました: {input_file}")
-        
-        # 文字列をPathオブジェクトに変換
-        processed = [Path(p) for p in data.get("processed", [])]
-        remaining = [Path(p) for p in data.get("remaining", [])]
-        
-        return processed, remaining
-    except Exception as e:
-        logger.error(f"進捗ファイル読み込みエラー: {e}")
-        return [], []
-
-def format_file_size(size_in_bytes):
-    """ファイルサイズを読みやすい形式に変換"""
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if size_in_bytes < 1024.0 or unit == 'GB':
-            break
-        size_in_bytes /= 1024.0
-    return f"{size_in_bytes:.2f} {unit}"
-
-def generate_html_report(results, source_dir, dest_dir, output_file="report.html"):
-    """処理結果のHTMLレポートを生成"""
-    # 簡略化したHTMLテンプレート
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>画像処理レポート</title>
-        <style>
-            body {{ font-family: 'Meiryo', 'Hiragino Kaku Gothic Pro', sans-serif; margin: 20px; }}
-            .summary {{ background-color: #f0f8ff; padding: 15px; border-radius: 5px; }}
-            .success {{ color: green; }}
-            .error {{ color: red; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
-            th {{ background-color: #f2f2f2; }}
-            .size-reduction {{ font-weight: bold; }}
-        </style>
-    </head>
-    <body>
-        <h1>画像処理レポート</h1>
-        <div class="summary">
-            <h2>処理概要</h2>
-            <p>処理日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p>処理ファイル数: {len(results)}</p>
-            <p>成功: <span class="success">{sum(1 for r in results if r.get('status') == 'success')}</span></p>
-            <p>エラー: <span class="error">{sum(1 for r in results if r.get('status') == 'error')}</span></p>
-            <p>処理前の総サイズ: {format_file_size(get_directory_size(source_dir))}</p>
-            <p>処理後の総サイズ: {format_file_size(get_directory_size(dest_dir))}</p>
-            <p class="size-reduction">削減率: {calculate_reduction_rate(source_dir, dest_dir):.1f}%</p>
-        </div>
-        
-        <h2>処理詳細</h2>
-        <table>
-            <tr>
-                <th>No.</th>
-                <th>ファイル名</th>
-                <th>元サイズ</th>
-                <th>処理後サイズ</th>
-                <th>削減率</th>
-                <th>状態</th>
-            </tr>
-    """
-    
-    # ファイル毎の行を生成
-    for idx, item in enumerate(results, 1):
-        status_class = "success" if item.get('status') == "success" else "error"
-        status_text = "成功" if item.get('status') == "success" else "エラー"
-        
-        html_content += f"""
-            <tr>
-                <td>{idx}</td>
-                <td>{item.get('name', '')}</td>
-                <td>{item.get('original_size', '')}</td>
-                <td>{item.get('new_size', '')}</td>
-                <td>{item.get('reduction', '0')}%</td>
-                <td class="{status_class}">{status_text}</td>
-            </tr>
-        """
-    
-    # HTMLを閉じる
-    html_content += """
-        </table>
-    </body>
-    </html>
-    """
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-    
-    logger.info(f"レポートを生成しました: {output_file}")
-    return output_file
-
-def parse_arguments():
-    """コマンドライン引数を解析する"""
-    parser = argparse.ArgumentParser(description='画像ファイルをリサイズして圧縮します。')
-    
-    # 基本オプション
-    parser.add_argument('--source', '-s', default=os.path.join(os.getcwd(), 'input'),
-                        help='入力ディレクトリのパス (デフォルト: カレントディレクトリ/input)')
-    parser.add_argument('--destination', '-d', default=os.path.join(os.getcwd(), 'output'),
-                        help='出力先ディレクトリのパス (デフォルト: カレントディレクトリ/output)')
-    parser.add_argument('--width', '-w', type=int, default=800,
-                        help='リサイズする幅 (デフォルト: 800px)')
-    parser.add_argument('--quality', '-q', type=int, default=87,
-                        help='JPEG品質 (デフォルト: 87%)')
-    
-    # 実行モード
-    parser.add_argument('--dry-run', action='store_true',
-                        help='ドライラン実行 (実際にファイルを変更しない)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                        help='詳細出力モード')
-    
-    # 新機能
-    parser.add_argument('--resume', action='store_true',
-                        help='前回の処理を再開する')
-    parser.add_argument('--report', action='store_true',
-                        help='処理結果のHTMLレポートを生成する')
-    parser.add_argument('--check-disk', action='store_true',
-                        help='ディスク容量を確認する')
-    
-    return parser.parse_args()
-
-
 def find_image_files(source_dir):
     """指定されたディレクトリから全ての.jpgと.pngファイルを検索する"""
     logger.info(f"ディレクトリを検索: {source_dir}")
@@ -317,7 +169,6 @@ def find_image_files(source_dir):
     
     logger.info(f"{len(image_files)}個の画像ファイルが見つかりました。")
     return image_files
-
 
 def sanitize_filename(filename):
     """ファイル名をWindows互換に変換"""
@@ -364,7 +215,6 @@ def get_destination_path(source_path, source_dir, dest_dir):
     
     # 長いパス対応のうえでパスを返す
     return Path(normalize_long_path(dest_path))
-
 
 def resize_and_compress_image(source_path, dest_path, target_width, quality, dry_run=False):
     """画像をリサイズして圧縮する（メモリ効率改善版）、元ファイルより小さくなることを保証"""
@@ -523,7 +373,6 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, dry
         logger.error(f"画像 '{source_path}' の処理中にエラーが発生しました: {e}")
         return None, None
 
-
 def format_file_size(size_in_bytes):
     """ファイルサイズを読みやすい形式に変換"""
     for unit in ['B', 'KB', 'MB', 'GB']:
@@ -532,44 +381,49 @@ def format_file_size(size_in_bytes):
         size_in_bytes /= 1024.0
     return f"{size_in_bytes:.2f} {unit}"
 
-
 def main():
     """メイン関数"""
-    # シグナルハンドラー登録
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    args = parse_arguments()
-    
-    # 詳細表示モード
-    if args.verbose:
-        logger.configure(handlers=[{"sink": sys.stderr, "level": "DEBUG"}])
-    
-    start_time = time.time()
-    
-    # ソースディレクトリのチェック
-    if not os.path.isdir(args.source):
-        logger.error(f"ソースディレクトリが見つかりません: {args.source}")
-        return 1
-    
-    # ディスク容量チェック
-    if args.check_disk and not args.dry_run:
-        if not check_disk_space(args.destination):
-            logger.error("出力先ディスクの空き容量が不足しています。処理を中止します。")
+    try:
+        args = parse_args()
+        
+        # デバッグモードの設定
+        global DEBUG_MODE
+        DEBUG_MODE = args.debug
+        
+        # ロガー設定
+        log_filename = setup_logger(args.verbose)
+        logger.info(f"CLIモードで起動しました。ログファイル: {log_filename}")
+        logger.info(f"Pythonバージョン: {sys.version}")
+        logger.info(f"OS情報: {os.name} - {sys.platform}")
+        
+        # シグナルハンドラの設定
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        # コマンドライン引数のログ出力
+        logger.debug(f"引数: {args}")
+        
+        # 入力値のバリデーション
+        source_dir = Path(args.source)
+        dest_dir = Path(args.destination)
+        
+        if not source_dir.exists():
+            logger.error(f"入力ディレクトリが存在しません: {source_dir}")
             return 1
-    
-    # 前回の処理を再開する場合
-    processed_files = []
-    if args.resume and not args.dry_run:
-        processed_files, remaining_files = load_progress()
-        if remaining_files:
-            image_files = remaining_files
-            logger.info(f"処理を再開します。既に{len(processed_files)}ファイル処理済み、残り{len(image_files)}ファイル")
-        else:
-            logger.warning("再開可能な進捗情報がありません。最初から処理します。")
-            image_files = find_image_files(args.source)
-    else:
+        
+        if not dest_dir.exists():
+            logger.info(f"出力ディレクトリを作成します: {dest_dir}")
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+            except Exception as e:
+                error_trace = traceback.format_exc()
+                logger.error(f"ディレクトリ作成失敗: {e}")
+                if DEBUG_MODE:
+                    logger.error(f"トレースバック情報:\n{error_trace}")
+                return 1
+        
         # 画像ファイルを検索
-        image_files = find_image_files(args.source)
+        try:
+            image_files = find_image_files(source_dir)
     
     if not image_files:
         logger.warning(f"ディレクトリ '{args.source}' には画像ファイルが見つかりませんでした。")
