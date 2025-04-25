@@ -317,8 +317,11 @@ def create_directory_with_permissions(directory_path):
         
         # Windows環境で長いパス対応
         if os.name == 'nt':
+            # normalize_long_pathは文字列を返すので、文字列として明示的に扱う
             directory_str = normalize_long_path(directory)
             os.makedirs(directory_str, exist_ok=True)
+            # 成功した場合、directory変数を更新して返却値に反映させる
+            directory = Path(directory_str)
         else:
             # 通常の処理
             directory.mkdir(parents=True, exist_ok=True)
