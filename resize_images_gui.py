@@ -42,13 +42,12 @@ update_queue = queue.Queue()  # スレッド間通信用キュー
 # 設定ファイルパス
 SETTINGS_FILE = Path(__file__).parent / 'gui_settings.json'
 
-def process_images_thread(values, window, dry_run=False):
+def process_images_thread(values, dry_run=False):
     """
     別スレッドで実行する画像処理関数
     
     Args:
         values: GUIからの入力値
-        window: ウィンドウオブジェクト
         dry_run: プレビューモード（True）か実行モード（False）か
     """
     global cancel_process, update_queue
@@ -626,7 +625,7 @@ def main():
                 # 別スレッドで処理実行
                 processing_thread = threading.Thread(
                     target=process_images_thread,
-                    args=(values, window, is_preview),  # プレビューフラグを渡す
+                    args=(values, is_preview),  
                     daemon=True
                 )
                 processing_thread.start()
