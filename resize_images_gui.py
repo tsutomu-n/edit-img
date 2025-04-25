@@ -6,6 +6,7 @@
 
 TkEasyGUIを使ったグラフィカルインターフェースで
 画像のリサイズと圧縮を行います。
+モダンなデザインとユーザビリティを備えています。
 """
 
 import os
@@ -15,14 +16,17 @@ import signal
 import threading
 import traceback
 import queue
+import json
 from datetime import datetime
 from pathlib import Path
+from PIL import Image, ImageTk
 
 # TkEasyGUI
+import tkinter as tk
 import TkEasyGUI as eg
 from TkEasyGUI import widgets
 from TkEasyGUI import dialogs
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 # カスタム画像処理モジュール
 import resize_core as core
@@ -420,50 +424,84 @@ def main():
         # 設定を読み込む
         settings = load_settings()
         
+        # テーマ設定
+        eg.theme("SystemDefaultForReal")
+
         # レイアウト定義
         layout = [
-            [eg.Text('画像リサイズ・圧縮ツール', font=('', 16))],
-            [eg.Text('入力フォルダ', size=(12, 1)), 
-             eg.Input(settings['source'], key='source', width=40), 
-             eg.FolderBrowse('参照')],
-            [eg.Text('出力フォルダ', size=(12, 1)), 
-             eg.Input(settings['dest'], key='dest', width=40), 
-             eg.FolderBrowse('参照')],
-            [eg.Text('リサイズ幅', size=(12, 1)), 
-             eg.Slider(range=(300, 3000), default_value=settings['width'], resolution=100, 
-                       orientation='h', width=40, key='width')],
-            [eg.Text('JPEG品質', size=(12, 1)), 
-             eg.Slider(range=(30, 100), default_value=settings['quality'], 
-                      orientation='h', width=40, key='quality')],
+            # ヘッダーセクション
+            [eg.Column([
+                [eg.Text('画像リサイズ・圧縮ツール', font=('Noto Sans CJK JP', 12, 'bold'))]
+            ])],
             
-            # 出力形式選択
-            [eg.Text('出力形式:', size=(12, 1)),
-             eg.Radio('JPEG', 'format', key='format_jpeg', default=settings.get('format_jpeg', True)),
-             eg.Radio('PNG', 'format', key='format_png', default=settings.get('format_png', False)),
-             eg.Radio('WebP', 'format', key='format_webp', default=settings.get('format_webp', False))],
-             
-            # 圧縮と品質のバランス調整
-            [eg.Text('圧縮バランス:', size=(12, 1)), 
-             eg.Slider(range=(1, 10), default_value=settings.get('balance', 5), orientation='h', width=40, 
-                      key='balance')],
-            [eg.Text('', size=(12, 1)), eg.Text('1=最高圧縮率(ファイルサイズ優先) / 10=最高品質(画質優先)', size=(40, 1))],
+            # 入出力設定カード
+            [eg.Frame('フォルダ設定', [
+                [eg.Text('入力フォルダ', size=(12, 1)), 
+                 eg.Input(settings['source'], key='source', size=(40, 1)), 
+                 eg.FolderBrowse('参照', button_color=('white', '#007ACC'))],
+                [eg.Text('出力フォルダ', size=(12, 1)), 
+                 eg.Input(settings['dest'], key='dest', size=(40, 1)), 
+                 eg.FolderBrowse('参照', button_color=('white', '#007ACC'))]
+            ])],
             
-            # メタデータオプション
-            [eg.Text('', size=(12, 1)), eg.Checkbox('EXIFメタデータを保持', default=settings.get('keep_exif', True), key='keep_exif')],
-            [eg.Checkbox("プレビューモード（ファイルを実際に保存しません）", default=settings.get('preview_mode', True), key="preview_mode")],
-            [eg.Text('処理ファイル:', size=(12, 1)), eg.Text('', key='current_file', size=(40, 1))],
-            [eg.Text('進行状況:'), eg.Slider(range=(0, 100), default_value=0, resolution=1, 
-                      orientation='h', width=45, key='progress', disabled=True),
-             eg.Text('0%', key='progress_text', size=(5, 1))],
-            [eg.Text('準備完了', key='status')],
-            [eg.Button("プレビュー", key="btn_preview", button_color=('white', '#4CAF50')), 
-             eg.Button("実行", key="btn_execute", button_color=('white', '#2196F3'), disabled=settings.get('preview_mode', True)),
-             eg.Button("キャンセル", key="btn_cancel", button_color=('white', '#f44336'), disabled=True),
-             eg.Button("終了", key="exit")]
+            # 画像設定カード
+            [eg.Frame('画像設定', [
+                # リサイズ設定
+                [eg.Text('リサイズ幅', size=(12, 1)), 
+                 eg.Slider(range=(300, 3000), default_value=settings['width'], resolution=100, 
+                           orientation='h', size=(40, 15), key='width',
+                           trough_color='#3C3C3C', slider_depth=16)],
+                [eg.Text(f"{settings['width']}px", key='width_value', size=(8, 1), font=('Noto Sans CJK JP', 10))],
+                
+                # JPEG品質設定
+                [eg.Text('JPEG品質', size=(12, 1)), 
+                 eg.Slider(range=(30, 100), default_value=settings['quality'], 
+                          orientation='h', size=(40, 15), key='quality',
+                          trough_color='#3C3C3C', slider_depth=16)],
+                [eg.Text(f"{settings['quality']}%", key='quality_value', size=(8, 1), font=('Noto Sans CJK JP', 10))],
+                
+                # 出力形式選択
+                [eg.Text('出力形式:', size=(12, 1)),
+                 eg.Radio('JPEG', 'format', key='format_jpeg', default=settings.get('format_jpeg', True)),
+                 eg.Radio('PNG', 'format', key='format_png', default=settings.get('format_png', False)),
+                 eg.Radio('WebP', 'format', key='format_webp', default=settings.get('format_webp', False))],
+                 
+                # 圧縮と品質のバランス調整
+                [eg.Text('圧縮バランス:', size=(12, 1)), 
+                 eg.Slider(range=(1, 10), default_value=settings.get('balance', 5), orientation='h', size=(40, 15), 
+                          key='balance', trough_color='#3C3C3C', slider_depth=16)],
+                [eg.Text(f"バランス: {settings.get('balance', 5)}", key='balance_value', size=(12, 1), font=('Noto Sans CJK JP', 10))],
+                [eg.Text('1=最高圧縮率(ファイルサイズ優先) / 10=最高品質(画質優先)', size=(50, 1), font=('Noto Sans CJK JP', 10))],
+            ])],
+            
+            # オプション設定カード
+            [eg.Frame('オプション', [
+                # メタデータオプション
+                [eg.Checkbox('EXIFメタデータを保持', default=settings.get('keep_exif', True), key='keep_exif')],
+                [eg.Checkbox("プレビューモード（ファイルを実際に保存しません）", default=settings.get('preview_mode', True), 
+                             key="preview_mode")],
+            ])],
+            
+            # 進行状況表示カード
+            [eg.Frame('処理状況', [
+                [eg.Text('処理ファイル:', size=(12, 1)), 
+                 eg.Text('', key='current_file', size=(40, 1), font=('Noto Sans CJK JP', 10))],
+                [eg.Text('進行状況:', size=(12, 1)), 
+                 eg.ProgressBar(max_value=100, orientation='h', size=(40, 20), key='progress', bar_color=('#007ACC', '#2E2E2E')),
+                 eg.Text('0%', key='progress_text', size=(5, 1), font=('Noto Sans CJK JP', 10))],
+                [eg.Text('準備完了', key='status', size=(50, 2), font=('Noto Sans CJK JP', 10))],
+            ])],
+            
+            # アクションボタン
+            [eg.Button("プレビュー", key="btn_preview", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1)), 
+             eg.Button("実行", key="btn_execute", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1), disabled=settings.get('preview_mode', True)),
+             eg.Button("キャンセル", key="btn_cancel", button_color=('white', '#FF0000'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1), disabled=True),
+             eg.Button("終了", key="exit", button_color=('white', '#AAAAAA'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1))]
         ]
         
         # ウィンドウ作成
         window = eg.Window('画像リサイズ・圧縮ツール', layout, resizable=True)
+        
         processing_thread = None
         
         # イベントループ
@@ -506,40 +544,46 @@ def main():
                 # キューが空の場合、処理を続行
                 pass
                 
-            # メインスレッド側ではファイルサイズ計算は行わない
-            # ファイルサイズ計算はprocess_images_thread内で行う
-            
             # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
+            
+            # スライダー値の表示を更新
+            if 'width' in values:
+                window['width_value'].update(f"{int(values['width'])}px")
+            if 'quality' in values:
+                window['quality_value'].update(f"{int(values['quality'])}%")
+            if 'balance' in values:
+                balance_text = "ファイルサイズ優先" if values['balance'] < 4 else "バランス" if values['balance'] < 7 else "画質優先"
+                window['balance_value'].update(f"バランス: {int(values['balance'])} ({balance_text})")
             
             if event in (eg.WINDOW_CLOSED, '終了'):
                 # 設定を保存
                 save_settings(values)
                 break
                 
-            elif event == 'preview_mode':
+            elif event == 'プレビューモード':
                 # プレビューモードの切り替え時の処理
-                window['btn_execute'].update(disabled=values['preview_mode'])
+                window['実行'].update(disabled=values['プレビューモード'])
                 
                 # 適切なボタンを強調表示
-                if values['preview_mode']:
-                    window['btn_preview'].update(button_color=('white', '#4CAF50'))  # 緑色強調
-                    window['btn_execute'].update(button_color=('white', '#A0A0A0'))  # グレー化
+                if values['プレビューモード']:
+                    window['プレビュー'].update(button_color=('white', '#007ACC'))  # 緑色強調
+                    window['実行'].update(button_color=('white', '#AAAAAA'))  # グレー化
                 else:
-                    window['btn_preview'].update(button_color=('white', '#A0A0A0'))  # グレー化
-                    window['btn_execute'].update(button_color=('white', '#2196F3'))  # 青色強調
+                    window['プレビュー'].update(button_color=('white', '#AAAAAA'))  # グレー化
+                    window['実行'].update(button_color=('white', '#007ACC'))  # 青色強調
                 
-            elif event == 'btn_preview' or event == 'btn_execute':
+            elif event == 'プレビュー' or event == '実行':
                 # プレビューか実行かの判定
-                is_preview = event == 'btn_preview'
+                is_preview = event == 'プレビュー'
                 # 入力値の検証
-                source_dir = values['source']
-                dest_dir = values['dest']
+                source_dir = values['入力フォルダ']
+                dest_dir = values['出力フォルダ']
                 
                 # プレビューモードの場合はチェックボックスを強制的にオン
                 if is_preview:
-                    values['preview_mode'] = True
-                    window['preview_mode'].update(True)
+                    values['プレビューモード'] = True
+                    window['プレビューモード'].update(True)
                 
                 if not os.path.exists(source_dir):
                     eg.popup_error(f'入力フォルダが見つかりません: {source_dir}')
@@ -559,13 +603,13 @@ def main():
                         continue
                         
                 # UI状態更新
-                window['btn_preview'].update(disabled=True)
-                window['btn_execute'].update(disabled=True)
-                window['btn_cancel'].update(disabled=False)
+                window['プレビュー'].update(disabled=True)
+                window['実行'].update(disabled=True)
+                window['キャンセル'].update(disabled=False)
                 
                 # モードに応じたステータス表示
                 mode_prefix = "【プレビュー】" if is_preview else ""
-                window['status'].update(f"{mode_prefix}処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%")
+                window['ステータス'].update(f"{mode_prefix}処理準備中... 幅: {int(values['幅'])}px, 品質: {int(values['品質'])}%")
                 
                 # 別スレッドで処理実行
                 processing_thread = threading.Thread(
@@ -575,9 +619,9 @@ def main():
                 )
                 processing_thread.start()
                 
-            elif event == 'btn_cancel':
+            elif event == 'キャンセル':
                 cancel_process = True
-                window['status'].update("キャンセル中...")
+                window['ステータス'].update("キャンセル中...")
         
         # ウィンドウを閉じる
         window.close()
