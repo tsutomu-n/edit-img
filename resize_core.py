@@ -650,7 +650,7 @@ def find_image_files(source_dir):
         return []
 
 
-def resize_and_compress_image(source_path, dest_path, target_width, quality, format='jpeg', keep_exif=True, balance=5, dry_run=False):
+def resize_and_compress_image(source_path, dest_path, target_width, quality, format='original', keep_exif=True, balance=5, webp_lossless=False, dry_run=False):
     """
     画像をリサイズして圧縮します
     
@@ -659,9 +659,10 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
         dest_path: 出力先ファイルパス (Path)
         target_width: 目標の幅 (ピクセル)
         quality: 圧縮品質 (1-100)
-        format: 出力形式 ('jpeg', 'png', 'webp')
+        format: 出力形式 ('original', 'jpeg', 'png', 'webp')
         keep_exif: EXIFメタデータを保持するか
-        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質)
+        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質) - 現在は主に品質調整に使用
+        webp_lossless: WebPをロスレスで保存するかどうか
         dry_run: 実際の処理を行わずサイズ見積もりのみ実施
         
     Returns:
@@ -671,7 +672,7 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
     source_path_str = ""
     file_size_before = 0
     dest_path_str = ""
-    keep_original = False
+    keep_original_size = False
     estimated_size = None
     resized_img = None
     img = None
@@ -724,17 +725,32 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
             with Image.open(source_path_str) as img:
                 # 画像フォーマットの確認
                 img_format = img.format
-                if img_format not in ['JPEG', 'PNG', 'WEBP']:
-                    logger.warning(f"サポートされていない画像フォーマット: {img_format}")
+                SUPPORTED_FORMATS = {'JPEG', 'PNG', 'WEBP'}
+                if img_format not in SUPPORTED_FORMATS:
+                    logger.warning(f"サポートされていない入力画像フォーマット: {img_format}。処理を試みますが、予期せぬ結果になる可能性があります。")
                     # 続行するが警告を記録
                 # 元の画像サイズ
                 original_width, original_height = img.size
                 
+                # --- 実際の出力形式を決定 --- 
+                actual_output_format = ''
+                if format == 'original':
+                    # 元の形式を維持する場合、読み込んだ形式を使う
+                    actual_output_format = img_format.upper() if img_format else 'JPEG' # 不明な場合はJPEGにフォールバック
+                    # サポート外形式ならJPEGに変換
+                    if actual_output_format not in SUPPORTED_FORMATS:
+                        logger.warning(f"入力形式 {actual_output_format} は維持できません。JPEGに変換します。")
+                        actual_output_format = 'JPEG'
+                else:
+                    # 特定の形式が指定された場合
+                    actual_output_format = format.upper()
+                # --- 出力形式決定ここまで ---
+                
                 # 既に十分小さい場合はリサイズ不要
-                keep_original = original_width <= target_width
+                keep_original_size = original_width <= target_width
                 
                 # 縦横比を維持したリサイズ計算
-                if not keep_original:
+                if not keep_original_size:
                     ratio = original_height / original_width
                     new_height = int(target_width * ratio)
                     new_size = (target_width, new_height)
@@ -746,7 +762,7 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                 estimated_size = None
                 
                 # ドライランまたはサイズ計算が必要な場合
-                if dry_run or not keep_original:
+                if dry_run or not keep_original_size:
                     # テンポラリパスを用意
                     import tempfile
                     import uuid
@@ -778,65 +794,104 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                             logger.debug(f"一時ファイルの削除に失敗: {e}")
                 
                 # 保存する画像を選択（ドライランでも必要）
-                if not keep_original:
+                if not keep_original_size:
                     save_img = resized_img
                 else:
-                    save_img = img
+                    # リサイズ不要でも、形式変換が必要な場合があるので img を使う
+                    save_img = img 
                 
                 # ドライランの場合は実際の保存は行わない
                 if dry_run:
                     # ドライランの場合はサイズ見積もりを返すのみ
-                    return True, keep_original, estimated_size
+                    return True, keep_original_size, estimated_size
                 
                 # 以下は実際の保存処理
                 # ディレクトリが存在するか確認
                 if not os.path.exists(os.path.dirname(dest_path_str)):
                     os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
                 
-                # バランス値に基づいて最適化パラメータを調整
-                optimized_quality = adjust_quality_by_balance(quality, balance, format)
+                # バランス値に基づいて最適化パラメータを調整 (JPEG/WebPの品質に使用)
+                optimized_quality = adjust_quality_by_balance(quality, balance, actual_output_format.lower())
                 
-                # 出力形式に応じた処理
-                if format.lower() == 'jpeg':
-                    # 拡張子を.jpgに更新
-                    dest_path_str = update_extension(dest_path_str, '.jpg')
+                # 出力形式に応じた保存処理
+                save_options = {}
+                output_ext = ''
+                final_dest_path_str = str(dest_path) # 元のdest_pathをベースにする
+
+                if actual_output_format == 'JPEG':
+                    output_ext = '.jpg'
+                    final_dest_path_str = update_extension(final_dest_path_str, output_ext)
+                    save_options = {
+                        'format': 'JPEG',
+                        'quality': optimized_quality,
+                        'optimize': True,
+                        'progressive': True
+                    }
+                    # EXIF情報を保持する場合
+                    if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
+                        save_options['exif'] = img.info['exif']
                     
-                    # RGBモードに変換してからJPEGとして保存
-                    try:
-                        # まずRGBモードに変換
-                        rgb_img = save_img.convert('RGB')
-                        
-                        # JPEGとして保存
-                        if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
-                            rgb_img.save(dest_path_str, format='JPEG', 
-                                        quality=optimized_quality,
-                                        exif=img.info['exif'])
-                        else:
-                            rgb_img.save(dest_path_str, format='JPEG', 
-                                        quality=optimized_quality)
-                    except Exception as e:
-                        logger.error(f"JPEG保存エラー: {e}")
-                        return False, False, None
+                    # JPEGはRGBモードである必要がある
+                    if save_img.mode != 'RGB':
+                        logger.debug(f"画像をRGBモードに変換中 (元: {save_img.mode})")
+                        save_img = save_img.convert('RGB')
+
+                elif actual_output_format == 'PNG':
+                    output_ext = '.png'
+                    final_dest_path_str = update_extension(final_dest_path_str, output_ext)
+                    # PNGの圧縮レベル (0-9, 9が最高圧縮)。品質とは直接関係ない。
+                    # 一旦固定値 (6) を使うか、バランスから簡易的に計算？ -> 固定値6 (Pillowのデフォルトより少し高め) にする
+                    compress_level = 6 
+                    save_options = {
+                        'format': 'PNG',
+                        'optimize': True,
+                        'compress_level': compress_level
+                    }
+                    # EXIFはPNG標準では保存されないことが多いが、念のため試みる (Pillow次第)
+                    if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
+                         if 'exif' not in save_options: save_options['exif'] = img.info['exif'] # 試すだけ
+
+                elif actual_output_format == 'WEBP':
+                    output_ext = '.webp'
+                    final_dest_path_str = update_extension(final_dest_path_str, output_ext)
+                    save_options = {
+                        'format': 'WEBP',
+                        'quality': optimized_quality,
+                        'lossless': webp_lossless,
+                        'method': 6 # 高品質な圧縮方法
+                    }
+                    # EXIF情報を保持する場合
+                    if keep_exif and hasattr(img, 'info') and 'exif' in img.info:
+                        save_options['exif'] = img.info['exif']
                     
-                elif format.lower() == 'png':
-                    # 拡張子を.pngに更新
-                    dest_path_str = update_extension(dest_path_str, '.png')
-                    
-                    # PNGはqualityではなくcompressionレベルを使用
-                    compression = int(9 - (optimized_quality / 10))  # 0-9の範囲に変換（9が最高圧縮）
-                    compression = max(0, min(9, compression))  # 範囲を確保
-                    
-                    # PNGとして保存
-                    save_img.save(dest_path_str, format='PNG', compress_level=compression)
-                    
-                elif format.lower() == 'webp':
-                    # 拡張子を.webpに更新
-                    dest_path_str = update_extension(dest_path_str, '.webp')
-                    
-                    # WebPはqualityをそのまま使用できる
-                    save_img.save(dest_path_str, format='WEBP', quality=optimized_quality)
-                
-                return True, keep_original, estimated_size
+                    # ロスレスで透明度がある場合は RGBA のまま保存
+                    if webp_lossless and 'A' in save_img.mode:
+                         logger.debug("WebPロスレスでRGBAモードのまま保存")
+                    # ロッシーで透明度がある場合も Pillow はよしなに対応してくれるはず
+                    elif not webp_lossless and 'A' in save_img.mode:
+                         logger.debug("WebPロッシーでRGBAモードのまま保存 (透明度サポート)")
+                    # 透明度がない場合はRGBで良い
+                    elif 'A' not in save_img.mode and save_img.mode != 'RGB':
+                         logger.debug(f"WebP用に画像をRGBモードに変換中 (元: {save_img.mode})")
+                         save_img = save_img.convert('RGB')
+
+                else:
+                    logger.error(f"未対応の出力形式です: {actual_output_format}")
+                    return False, False, estimated_size # エラーとして返す
+
+                # 画像を保存 (リトライ機構付きで)
+                def save_image_action():
+                    logger.debug(f"保存実行: {final_dest_path_str}, オプション: {save_options}")
+                    save_img.save(final_dest_path_str, **save_options)
+                    logger.info(f"保存完了: {final_dest_path_str}")
+
+                try:
+                    retry_on_file_error(save_image_action, max_retries=3, retry_delay=0.5)
+                except Exception as e:
+                    logger.error(f"最終的な画像保存エラー ({final_dest_path_str}): {e}")
+                    return False, False, estimated_size
+
+                return True, keep_original_size, estimated_size
                 
         except UnidentifiedImageError:
             logger.error(f"未対応または破損した画像形式: {source_path}")
@@ -981,6 +1036,7 @@ def load_progress(input_file="progress.json"):
     except Exception as e:
         logger.error(f"進捗データ読み込みエラー: {e}")
         return [], []
+
 
 # 初期ロギング設定
 setup_logging()

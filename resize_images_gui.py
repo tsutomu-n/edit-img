@@ -69,7 +69,9 @@ def process_images_thread(values, dry_run=False):
         
         # 新しいパラメータの取得
         # 出力形式の取得
-        if values.get('format_jpeg', True):
+        if values.get('format_original', True):
+            format_type = 'original'
+        elif values.get('format_jpeg', False):
             format_type = 'jpeg'
         elif values.get('format_png', False):
             format_type = 'png'
@@ -83,6 +85,10 @@ def process_images_thread(values, dry_run=False):
         
         # EXIFメタデータオプション
         keep_exif = values.get('keep_exif', True)
+        
+        # WebPロスレスオプション
+        webp_lossless = values.get('webp_lossless', False)
+        
     except Exception as e:
         # 直接更新する代わりにキューにメッセージを送る
         update_queue.put(('status', f"エラー: パスの正規化に失敗しました - {str(e)}"))
@@ -108,13 +114,16 @@ def process_images_thread(values, dry_run=False):
         # update_queue.put(('progress', {'value': 0}))
         # update_queue.put(('progress_text', '0%'))
         # 詳細な処理説明を表示
-        format_name = {'jpeg': 'JPEG', 'png': 'PNG', 'webp': 'WebP'}[format_type]
+        format_name = {'jpeg': 'JPEG', 'png': 'PNG', 'webp': 'WebP', 'original': '元の形式'}[format_type]
         exif_status = '保持する' if keep_exif else '削除する'
         balance_desc = '圧縮優先' if balance < 4 else '標準' if balance < 7 else '品質優先'
         
         status_msg = f"処理開始: 合計 {len(image_files)} ファイル\n" \
                    f"出力形式: {format_name}, 幅: {width}px, 品質: {quality}%, " \
                    f"バランス: {balance} ({balance_desc}), EXIF: {exif_status}"
+        
+        if format_type == 'webp':
+            status_msg += f", WebPロスレス: {webp_lossless}"
         
         update_queue.put(('status', status_msg))
         
@@ -159,6 +168,7 @@ def process_images_thread(values, dry_run=False):
                         format=format_type,
                         keep_exif=keep_exif,
                         balance=balance,
+                        webp_lossless=webp_lossless,
                         dry_run=dry_run
                     )
                 except Exception as e:
@@ -374,11 +384,13 @@ def load_settings():
         'dest': './output',
         'width': 1200,
         'quality': 87,
-        'format_jpeg': True,
+        'format_original': True,
+        'format_jpeg': False,
         'format_png': False,
         'format_webp': False,
         'balance': 5,
         'keep_exif': True,
+        'webp_lossless': False,
         'preview_mode': False,  # デフォルトはプレビューモードを無効にする
     }
     
@@ -413,9 +425,9 @@ def save_settings(settings):
     """
     try:
         # GUIコントロール関連の値を除外
-        save_keys = ['source', 'dest', 'width', 'quality', 'format_jpeg', 
-                    'format_png', 'format_webp', 'balance', 'keep_exif',
-                    'preview_mode']
+        save_keys = ['source', 'dest', 'width', 'quality', 'format_original', 
+                    'format_jpeg', 'format_png', 'format_webp', 'balance', 'keep_exif',
+                    'webp_lossless', 'preview_mode']
         save_data = {k: settings[k] for k in save_keys if k in settings}
         
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -477,7 +489,8 @@ def main():
                 
                 # 出力形式選択
                 [eg.Text('出力形式:', size=(12, 1)),
-                 eg.Radio('JPEG', 'format', key='format_jpeg', default=settings.get('format_jpeg', True)),
+                 eg.Radio('元の形式を維持', 'format', key='format_original', default=settings.get('format_original', True)),
+                 eg.Radio('JPEG', 'format', key='format_jpeg', default=settings.get('format_jpeg', False)),
                  eg.Radio('PNG', 'format', key='format_png', default=settings.get('format_png', False)),
                  eg.Radio('WebP', 'format', key='format_webp', default=settings.get('format_webp', False))],
                  
@@ -487,6 +500,9 @@ def main():
                           key='balance')],
                 [eg.Text(f"バランス: {settings.get('balance', 5)}", key='balance_value', size=(12, 1), font=('Noto Sans CJK JP', 10))],
                 [eg.Text('1=最高圧縮率(ファイルサイズ優先) / 10=最高品質(画質優先)', size=(50, 1), font=('Noto Sans CJK JP', 10))],
+                
+                # WebPロスレスオプション
+                [eg.Checkbox('WebPロスレスで保存', key='webp_lossless', default=settings.get('webp_lossless', False))],
             ])],
             
             # オプション設定カード
