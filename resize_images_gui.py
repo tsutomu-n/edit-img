@@ -378,17 +378,28 @@ def load_settings():
     }
     
     if not SETTINGS_FILE.exists():
+        logger.info(f"設定ファイルが見つかりません: {SETTINGS_FILE}. デフォルト設定を使用します。") # Log if not found
         return default_settings
         
+    logger.info(f"設定ファイルが見つかりました: {SETTINGS_FILE}. 読み込みを試みます。") # Log if found
     try:
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-            saved_settings = json.load(f)
+            content = f.read() # Read content first
+            if not content.strip(): # Check if file is empty or whitespace only
+                 logger.warning(f"設定ファイルは空です: {SETTINGS_FILE}. デフォルト設定を使用します。")
+                 return default_settings
+            # If not empty, try to load
+            saved_settings = json.loads(content) # Use json.loads on the read content
         # デフォルト設定をロードした設定で上書き
         settings = default_settings.copy()
         settings.update(saved_settings)
+        logger.info(f"設定ファイルを正常に読み込みました: {SETTINGS_FILE}")
         return settings
+    except json.JSONDecodeError as e: # Catch specific JSON error
+        logger.error(f"設定ファイルのJSON形式が無効です ({SETTINGS_FILE}): {e}. デフォルト設定を使用します。")
+        return default_settings
     except Exception as e:
-        logger.error(f"設定ファイル読み込みエラー: {e}")
+        logger.error(f"設定ファイル読み込み中に予期せぬエラーが発生しました ({SETTINGS_FILE}): {e}. デフォルト設定を使用します。")
         return default_settings
 
 def save_settings(settings):
@@ -439,10 +450,10 @@ def main():
             [eg.Frame('フォルダ設定', [
                 [eg.Text('入力フォルダ', size=(12, 1)), 
                  eg.Input(settings['source'], key='source', size=(40, 1)), 
-                 eg.FolderBrowse('参照', button_color=('white', '#007ACC'))],
+                 eg.FolderBrowse('参照', key='-browse1-', target='source')],
                 [eg.Text('出力フォルダ', size=(12, 1)), 
                  eg.Input(settings['dest'], key='dest', size=(40, 1)), 
-                 eg.FolderBrowse('参照', button_color=('white', '#007ACC'))]
+                 eg.FolderBrowse('参照', key='-browse2-', target='dest')]
             ])],
             
             # 画像設定カード
