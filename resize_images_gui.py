@@ -425,7 +425,8 @@ def main():
         settings = load_settings()
         
         # テーマ設定
-        eg.theme("SystemDefaultForReal")
+        # eg.theme("SystemDefaultForReal") # Windowsで利用できない場合がある
+        eg.theme("vista") # Windows標準に近いテーマに変更
 
         # レイアウト定義
         layout = [
