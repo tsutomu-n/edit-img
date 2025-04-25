@@ -205,7 +205,12 @@ def process_images_thread(values, dry_run=False):
                             update_queue.put(('status', "サイズ予測ができませんでした"))
                             continue
                         
+                        # 個別のファイルの削減量を計算
                         reduction = ((file_size_before - file_size_after) / file_size_before * 100)
+                        
+                        # 合計サイズに加算
+                        total_size_after += file_size_after
+                        
                         status_msg = (f"{status_prefix}{core.format_file_size(file_size_before)} → "
                                      f"{core.format_file_size(file_size_after)} ({reduction:.1f}% 削減)")
                         update_queue.put(('status', status_msg))
