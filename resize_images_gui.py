@@ -99,8 +99,8 @@ def process_images_thread(values, window, dry_run=False):
         
         # 進行状況の設定
         # 直接更新せずにキューに送る
-        update_queue.put(('progress', {'value': 0}))
-        update_queue.put(('progress_text', '0%'))
+        # update_queue.put(('progress', {'value': 0}))
+        # update_queue.put(('progress_text', '0%'))
         # 詳細な処理説明を表示
         format_name = {'jpeg': 'JPEG', 'png': 'PNG', 'webp': 'WebP'}[format_type]
         exif_status = '保持する' if keep_exif else '削除する'
@@ -138,9 +138,9 @@ def process_images_thread(values, window, dry_run=False):
                 update_queue.put(('current_file', f"{idx+1}/{len(image_files)}: {file_name}"))
                 
                 # 進行状況を更新
-                progress_percent = int((idx / len(image_files)) * 100)
-                update_queue.put(('progress', {'value': progress_percent}))
-                update_queue.put(('progress_text', f'{progress_percent}%'))
+                # progress_percent = int((idx / len(image_files)) * 100)
+                # update_queue.put(('progress', {'value': progress_percent}))
+                # update_queue.put(('progress_text', f'{progress_percent}%'))
                 
                 # ファイルサイズを取得
                 file_size_before = img_path.stat().st_size
@@ -221,12 +221,12 @@ def process_images_thread(values, window, dry_run=False):
                 skipped += 1
             
             # 進行状況の更新
-            progress_value = idx + 1
-            progress_percent = int((progress_value / len(image_files)) * 100)
+            # progress_value = idx + 1
+            # progress_percent = int((progress_value / len(image_files)) * 100)
             
             # 進捗状況をキューに送る
-            update_queue.put(('progress', {'value': progress_value}))
-            update_queue.put(('progress_text', f'{progress_percent}%'))
+            # update_queue.put(('progress', {'value': progress_value}))
+            # update_queue.put(('progress_text', f'{progress_percent}%'))
             
             # カンセルをチェック
             # 直接window.read()は呼び出さず、メインスレッドでチェックする
@@ -487,9 +487,9 @@ def main():
             [eg.Frame('処理状況', [
                 [eg.Text('処理ファイル:', size=(12, 1)), 
                  eg.Text('', key='current_file', size=(40, 1), font=('Noto Sans CJK JP', 10))],
-                [eg.Text('進行状況:', size=(12, 1)), 
-                 eg.widgets.ProgressBar(100, orientation='h', size=(40, 20), key='progress', bar_color=('#007ACC', '#2E2E2E')),
-                 eg.Text('0%', key='progress_text', size=(5, 1), font=('Noto Sans CJK JP', 10))],
+                # [eg.Text('進行状況:', size=(12, 1)), 
+                #  eg.Progress(100, orientation='h', size=(40, 20), key='progress', bar_color=('#007ACC', '#2E2E2E')),
+                #  eg.Text('0%', key='progress_text', size=(5, 1), font=('Noto Sans CJK JP', 10))],
                 [eg.Text('準備完了', key='status', size=(50, 2), font=('Noto Sans CJK JP', 10))],
             ])],
             
