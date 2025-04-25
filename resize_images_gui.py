@@ -566,10 +566,14 @@ def main():
         
         # イベントループ
         while True:
-            # 改善点1: タイムアウトを指定してGUIの応答性を維持
+            # タイムアウトを指定してGUIの応答性を維持（イベント読み取りは1回だけ）
             event, values = window.read(timeout=100)  # 100msのタイムアウトで定期的にイベントをチェック
+            
+            # イベントログ記録（タイムアウト以外）
+            if event != eg.TIMEOUT_KEY: # Ignore TIMEOUT events
+                logger.debug(f"Event received: {event}") # イベント受信ログ
 
-            # 改善点2: キュー処理を最適化
+            # キュー処理を最適化
             try:
                 # 最大処理数を設定してCPU状態を改善
                 queue_items_processed = 0
@@ -598,7 +602,7 @@ def main():
                                 # キャンセル状態をスレッドに伝えるためのダミーメッセージ処理
                                 pass
                             elif key == 'process_complete':
-                                # 改善点3: スレッド終了処理の改善
+                                # スレッド終了処理の改善
                                 if processing_thread and processing_thread.is_alive():
                                     # タイムアウトを長くし、終了を確実に待つ
                                     logger.debug("スレッド終了処理中")
@@ -617,17 +621,12 @@ def main():
                                 window[key].update(value)
                         update_queue.task_done()
                     except queue.Empty:
-                        # キューが空の場合、ループを拉ける
+                        # キューが空の場合、ループを抜ける
                         break
             except Exception as e:
                 # キュー処理全体の例外をキャッチ
                 logger.error(f"キュー処理中に例外が発生しました: {e}")
                 time.sleep(0.1)  # 短い限界待機でCPU負荷を軽減
-                
-            # GUIイベントを読み取る
-            event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
-            if event != eg.TIMEOUT_KEY: # Ignore TIMEOUT events
-                logger.debug(f"Event received: {event}") # 追加: イベント受信ログ
             
             # スライダー値の表示を更新
             if 'width' in values:
