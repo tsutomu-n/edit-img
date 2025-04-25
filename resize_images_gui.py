@@ -198,7 +198,20 @@ def process_images_thread(values, dry_run=False):
                             status_prefix = "【プレビュー】予測: "
                         elif not dry_run:
                             # 実際のファイルサイズを取得
-                            file_size_after = dest_path.stat().st_size
+                            # 元のdest_pathと異なる拡張子で保存された可能性があるため、拡張子を更新
+                            final_dest_path = None
+                            if format_type == 'jpeg' or (format_type == 'original' and not img_path.suffix.lower() in ['.jpg', '.jpeg']):
+                                final_dest_path = Path(core.update_extension(str(dest_path), '.jpg'))
+                            elif format_type == 'png' or (format_type == 'original' and img_path.suffix.lower() == '.png'):
+                                final_dest_path = Path(core.update_extension(str(dest_path), '.png'))
+                            elif format_type == 'webp':
+                                final_dest_path = Path(core.update_extension(str(dest_path), '.webp'))
+                            else:
+                                # デフォルトはJPEG
+                                final_dest_path = Path(core.update_extension(str(dest_path), '.jpg'))
+                            
+                            # 更新されたパスでファイルサイズを取得
+                            file_size_after = final_dest_path.stat().st_size
                             status_prefix = ""
                         else:
                             # 予測できなかった場合

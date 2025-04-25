@@ -958,6 +958,7 @@ def resize_and_compress_image(source_path, dest_path, target_width: int, quality
                 save_options = {}
                 output_ext = ''
                 final_dest_path_str = str(dest_path) # 元のdest_pathをベースにする
+                final_dest_path = dest_path # Path オブジェクトも初期化
 
                 if actual_output_format == 'JPEG':
                     output_ext = '.jpg'
