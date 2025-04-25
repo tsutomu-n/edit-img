@@ -488,7 +488,7 @@ def main():
                 [eg.Text('処理ファイル:', size=(12, 1)), 
                  eg.Text('', key='current_file', size=(40, 1), font=('Noto Sans CJK JP', 10))],
                 [eg.Text('進行状況:', size=(12, 1)), 
-                 eg.ProgressBar(max_value=100, orientation='h', size=(40, 20), key='progress', bar_color=('#007ACC', '#2E2E2E')),
+                 eg.widgets.ProgressBar(100, orientation='h', size=(40, 20), key='progress', bar_color=('#007ACC', '#2E2E2E')),
                  eg.Text('0%', key='progress_text', size=(5, 1), font=('Noto Sans CJK JP', 10))],
                 [eg.Text('準備完了', key='status', size=(50, 2), font=('Noto Sans CJK JP', 10))],
             ])],
