@@ -553,43 +553,63 @@ def main():
         
         # イベントループ
         while True:
-            # キューからのメッセージを処理（ノンブロッキング）
+            # 改善点1: タイムアウトを指定してGUIの応答性を維持
+            event, values = window.read(timeout=100)  # 100msのタイムアウトで定期的にイベントをチェック
+
+            # 改善点2: キュー処理を最適化
             try:
-                while True:  # 全ての待機中メッセージを処理
-                    msg = update_queue.get_nowait()
-                    if msg:
-                        key, value = msg
-                        if key == 'error_popup':
-                            # エラーポップアップの処理
-                            eg.popup_error(value, title="エラー")
-                        elif key == 'popup':
-                            # 通常のポップアップを表示
-                            try:
-                                # valueは追加パラメータを持つ辞書
-                                message = value.get('message', '')
-                                title = value.get('title', '情報')
-                                eg.popup(message, title=title)
-                            except Exception as e:
-                                logger.error(f"GUIポップアップ表示に失敗: {e}")
-                        elif key == 'check_cancel':
-                            # キャンセル状態をスレッドに伝えるためのダミーメッセージ処理
-                            # 実際のキャンセル状態はグローバル変数で管理されている
-                            pass
-                        elif key == 'process_complete':
-                            # 処理完了の場合、スレッドをクリア
-                            if processing_thread and processing_thread.is_alive():
-                                processing_thread.join(0.1)  # スレッド終了を確認
-                            processing_thread = None
-                        elif isinstance(value, dict):
-                            # 追加パラメータ付きの更新
-                            window[key].update(**value)
-                        else:
-                            # 単純な更新
-                            window[key].update(value)
-                    update_queue.task_done()
-            except queue.Empty:
-                # キューが空の場合、処理を続行
-                pass
+                # 最大処理数を設定してCPU状態を改善
+                queue_items_processed = 0
+                max_queue_items_per_cycle = 10  # 1サイクルで処理する最大キュー数
+                
+                while queue_items_processed < max_queue_items_per_cycle:
+                    try:
+                        msg = update_queue.get_nowait()
+                        queue_items_processed += 1
+                        
+                        if msg:
+                            key, value = msg
+                            if key == 'error_popup':
+                                # エラーポップアップの処理
+                                eg.popup_error(value, title="エラー")
+                            elif key == 'popup':
+                                # 通常のポップアップを表示
+                                try:
+                                    # valueは追加パラメータを持つ辞書
+                                    message = value.get('message', '')
+                                    title = value.get('title', '情報')
+                                    eg.popup(message, title=title)
+                                except Exception as e:
+                                    logger.error(f"GUIポップアップ表示に失敗: {e}")
+                            elif key == 'check_cancel':
+                                # キャンセル状態をスレッドに伝えるためのダミーメッセージ処理
+                                pass
+                            elif key == 'process_complete':
+                                # 改善点3: スレッド終了処理の改善
+                                if processing_thread and processing_thread.is_alive():
+                                    # タイムアウトを長くし、終了を確実に待つ
+                                    logger.debug("スレッド終了処理中")
+                                    processing_thread.join(0.5)  # タイムアウトを長めに設定
+                                processing_thread = None
+                                # ボタンの状態を戻す
+                                window['btn_preview'].update(disabled=False)
+                                window['btn_execute'].update(disabled=values.get('preview_mode', False))
+                                window['btn_cancel'].update(disabled=True)
+                                logger.debug("ボタン状態をリセットしました")
+                            elif isinstance(value, dict):
+                                # 追加パラメータ付きの更新
+                                window[key].update(**value)
+                            else:
+                                # 単純な更新
+                                window[key].update(value)
+                        update_queue.task_done()
+                    except queue.Empty:
+                        # キューが空の場合、ループを拉ける
+                        break
+            except Exception as e:
+                # キュー処理全体の例外をキャッチ
+                logger.error(f"キュー処理中に例外が発生しました: {e}")
+                time.sleep(0.1)  # 短い限界待機でCPU負荷を軽減
                 
             # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
