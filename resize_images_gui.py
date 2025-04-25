@@ -460,15 +460,13 @@ def main():
                 # リサイズ設定
                 [eg.Text('リサイズ幅', size=(12, 1)), 
                  eg.Slider(range=(300, 3000), default_value=settings['width'], resolution=100, 
-                           orientation='h', size=(40, 15), key='width',
-                           trough_color='#3C3C3C', slider_depth=16)],
+                           orientation='h', size=(40, 15), key='width')],
                 [eg.Text(f"{settings['width']}px", key='width_value', size=(8, 1), font=('Noto Sans CJK JP', 10))],
                 
                 # JPEG品質設定
                 [eg.Text('JPEG品質', size=(12, 1)), 
                  eg.Slider(range=(30, 100), default_value=settings['quality'], 
-                          orientation='h', size=(40, 15), key='quality',
-                          trough_color='#3C3C3C', slider_depth=16)],
+                          orientation='h', size=(40, 15), key='quality')],
                 [eg.Text(f"{settings['quality']}%", key='quality_value', size=(8, 1), font=('Noto Sans CJK JP', 10))],
                 
                 # 出力形式選択
@@ -480,7 +478,7 @@ def main():
                 # 圧縮と品質のバランス調整
                 [eg.Text('圧縮バランス:', size=(12, 1)), 
                  eg.Slider(range=(1, 10), default_value=settings.get('balance', 5), orientation='h', size=(40, 15), 
-                          key='balance', trough_color='#3C3C3C', slider_depth=16)],
+                          key='balance')],
                 [eg.Text(f"バランス: {settings.get('balance', 5)}", key='balance_value', size=(12, 1), font=('Noto Sans CJK JP', 10))],
                 [eg.Text('1=最高圧縮率(ファイルサイズ優先) / 10=最高品質(画質優先)', size=(50, 1), font=('Noto Sans CJK JP', 10))],
             ])],
