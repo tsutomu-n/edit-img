@@ -450,10 +450,10 @@ def main():
             [eg.Frame('フォルダ設定', [
                 [eg.Text('入力フォルダ', size=(12, 1)), 
                  eg.Input(settings['source'], key='source', size=(40, 1)), 
-                 eg.FolderBrowse('参照', key='-browse1-', target='source')],
+                 eg.FolderBrowse('参照', key='-browse1-')],
                 [eg.Text('出力フォルダ', size=(12, 1)), 
                  eg.Input(settings['dest'], key='dest', size=(40, 1)), 
-                 eg.FolderBrowse('参照', key='-browse2-', target='dest')]
+                 eg.FolderBrowse('参照', key='-browse2-')],
             ])],
             
             # 画像設定カード
