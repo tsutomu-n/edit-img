@@ -33,7 +33,7 @@ import resize_core as core
 from resize_core import logger
 
 # デバッグモード設定
-DEBUG_MODE = True  # Trueにすると詳細なエラー情報を表示
+DEBUG_MODE = False  # Trueにすると詳細なエラー情報を表示
 
 # グローバル変数
 cancel_process = False  # 処理キャンセルフラグ
