@@ -619,55 +619,166 @@ def get_destination_path(source_path, source_dir, dest_dir):
     return result_path
 
 
-def find_image_files(source_dir):
+def find_image_files(source_dir) -> list[Path]:
     """
     指定されたディレクトリから全ての.jpgと.pngファイルを検索します
     
     Args:
-        source_dir: 検索対象のディレクトリパス
+        source_dir: 検索対象のディレクトリパス（str または Path オブジェクト）
         
     Returns:
-        list: 画像ファイルパスのリスト（Path）
+        list[Path]: 画像ファイルパスのリスト（Path）
+        
+    Raises:
+        ValueError: source_dir が None、空文字列、または無効な形式の場合
+        FileNotFoundError: 指定されたディレクトリが存在しない場合
+        NotADirectoryError: 指定されたパスがディレクトリでない場合
+        PermissionError: 権限不足でアクセスできない場合
     """
-    image_files = []
-    source_path = Path(source_dir)
+    # 入力バリデーション
+    if source_dir is None:
+        error_msg = "ディレクトリパスがNoneです"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+        
+    if isinstance(source_dir, str) and not source_dir.strip():
+        error_msg = "ディレクトリパスが空です"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
     
+    # Pathオブジェクトに変換
+    try:
+        source_path = Path(source_dir)
+    except TypeError as e:
+        error_msg = f"無効なディレクトリパス形式です: {e}"
+        logger.error(error_msg)
+        raise ValueError(error_msg) from e
+    
+    # 存在確認
     if not source_path.exists():
-        logger.error(f"指定されたディレクトリが存在しません: {source_dir}")
-        return []
+        error_msg = f"指定されたディレクトリが存在しません: {source_dir}"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    # ディレクトリであることを確認
+    if not source_path.is_dir():
+        error_msg = f"指定されたパスはディレクトリではありません: {source_dir}"
+        logger.error(error_msg)
+        raise NotADirectoryError(error_msg)
+    
+    # 読み取り権限があることを確認
+    try:
+        os.access(source_path, os.R_OK)
+    except Exception as e:
+        error_msg = f"ディレクトリの読み取り権限を確認できません: {e}"
+        logger.error(error_msg)
+        # 権限チェックでエラーがあれば後続の処理で捕捉する
+        pass
+    
+    image_files = []
+    extensions = [".jpg", ".jpeg", ".png"]
     
     try:
-        # .jpg, .jpeg, .pngファイルを検索
-        for pattern in ["**/*.jpg", "**/*.jpeg", "**/*.png"]:
-            # normalize_long_pathを使ってWindowsの長いパス対応
-            norm_path = normalize_long_path(source_path) if os.name == 'nt' else source_path
-            image_files.extend(list(Path(norm_path).glob(pattern)))
+        # Windows環境の場合は長いパス対応
+        if os.name == 'nt':
+            try:
+                norm_path = normalize_long_path(source_path)
+            except Exception as e:
+                logger.warning(f"パス正規化中にエラーが発生しました（通常パスを使用します）: {e}")
+                norm_path = source_path
+        else:
+            norm_path = source_path
         
-        logger.info(f"{len(image_files)}個の画像ファイルが見つかりました")
-        return sorted(image_files)
+        # 一度に複数の拡張子をチェック
+        for ext in extensions:
+            try:
+                # rglob を使用して再帰的に検索 (glob の代わりにより堅牢なパターン)
+                pattern = f"*{ext}"
+                found_files = list(norm_path.rglob(pattern))
+                logger.debug(f"{ext} 拡張子のファイルを {len(found_files)} 個見つけました")
+                image_files.extend(found_files)
+            except PermissionError as e:
+                # 権限エラーの場合（一部のサブディレクトリにはアクセスできない可能性がある）
+                logger.warning(f"一部のディレクトリにアクセスできませんでした（権限エラー）: {e}")
+                continue
+            except OSError as e:
+                # ファイルシステム関連のエラー
+                logger.warning(f"ファイルシステムエラー（パターン '{pattern}'）: {e}")
+                continue
+            except Exception as e:
+                # その他の予期せぬエラー
+                logger.warning(f"画像検索中にエラーが発生しました（パターン '{pattern}'）: {e}")
+                continue
+        
+        # 重複の削除（念のため）と並べ替え
+        unique_files = list(set(image_files))
+        sorted_files = sorted(unique_files)
+        
+        total_found = len(sorted_files)
+        if total_found > 0:
+            logger.info(f"{total_found}個の画像ファイルが見つかりました")
+        else:
+            logger.warning(f"画像ファイルが見つかりませんでした: {source_dir}")
+        
+        return sorted_files
+    except PermissionError as e:
+        error_msg = f"ディレクトリにアクセスする権限がありません: {e}"
+        logger.error(error_msg)
+        raise PermissionError(error_msg) from e
     except Exception as e:
-        logger.error(f"画像ファイル検索エラー: {e}")
-        return []
+        error_msg = f"画像ファイル検索中に予期せぬエラーが発生しました: {e}"
+        logger.error(error_msg)
+        # 重大なエラーはログを出して、呼び出し元に例外を伝播させる
+        raise RuntimeError(error_msg) from e
 
 
-def resize_and_compress_image(source_path, dest_path, target_width, quality, format='original', keep_exif=True, balance=5, webp_lossless=False, dry_run=False):
+def resize_and_compress_image(source_path, dest_path, target_width: int, quality: int, 
+                       format: str = 'original', keep_exif: bool = True, 
+                       balance: int = 5, webp_lossless: bool = False, 
+                       dry_run: bool = False) -> tuple[bool, bool, int | None]:
     """
     画像をリサイズして圧縮します
     
     Args:
-        source_path: 元の画像ファイルパス (Path)
-        dest_path: 出力先ファイルパス (Path)
-        target_width: 目標の幅 (ピクセル)
-        quality: 圧縮品質 (1-100)
+        source_path: 元の画像ファイルパス (str または Path)
+        dest_path: 出力先ファイルパス (str または Path)
+        target_width: 目標の幅 (ピクセル、1以上の整数)
+        quality: 圧縮品質 (1-100の整数)
         format: 出力形式 ('original', 'jpeg', 'png', 'webp')
         keep_exif: EXIFメタデータを保持するか
-        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質) - 現在は主に品質調整に使用
+        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質)
         webp_lossless: WebPをロスレスで保存するかどうか
         dry_run: 実際の処理を行わずサイズ見積もりのみ実施
         
     Returns:
-        tuple: (成功したか, 元のサイズを維持したか, 見積もりサイズ)
+        tuple[bool, bool, int | None]: (成功したか, 元のサイズを維持したか, 見積もりサイズ)
+        
+    Raises:
+        ValueError: パラメータが無効な場合
+        FileNotFoundError: ソースファイルが存在しない場合
+        PermissionError: ファイルアクセス権限がない場合
+        OSError: ファイルシステム関連のエラー
+        PIL.UnidentifiedImageError: サポートされていない画像形式または破損している場合
     """
+    # パラメータバリデーション
+    if target_width is None or target_width <= 0:
+        error_msg = f"無効な目標幅です: {target_width}. 1以上の正の整数が必要です"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    if quality is None or not (1 <= quality <= 100):
+        error_msg = f"無効な品質値です: {quality}. 1から100の間の整数が必要です"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+        
+    if balance is None or not (1 <= balance <= 10):
+        error_msg = f"無効なバランス値です: {balance}. 1から10の間の整数が必要です"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    if format not in ['original', 'jpeg', 'png', 'webp']:
+        logger.warning(f"推奨されない出力形式: {format}. 'original', 'jpeg', 'png', 'webp' のいずれかを使用することをお勧めします")
+    
     # 変数の初期化 - スコープ問題防止のため先に定義
     source_path_str = ""
     file_size_before = 0
@@ -679,6 +790,15 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
     save_img = None
     
     try:
+        # Path オブジェクトに変換
+        try:
+            source_path = Path(source_path) if not isinstance(source_path, Path) else source_path
+            dest_path = Path(dest_path) if not isinstance(dest_path, Path) else dest_path
+        except TypeError as e:
+            error_msg = f"パスの変換に失敗しました: {e}"
+            logger.error(error_msg)
+            raise ValueError(error_msg) from e
+        
         # パスの正規化にリトライ機構を使用
         def normalize_path_with_retry(path):
             return normalize_long_path(path, remove_prefix=True)
@@ -704,8 +824,9 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
         dest_dir = Path(dest_path).parent
         success, created_dir = create_directory_with_permissions(dest_dir)
         if not success:
-            logger.error(f"出力先ディレクトリを作成できませんでした: {dest_dir}")
-            return False, False, None
+            error_msg = f"出力先ディレクトリを作成できませんでした: {dest_dir}"
+            logger.error(error_msg)
+            raise PermissionError(error_msg)
 
         # 出力先パスを文字列に変換
         dest_path_str = str(dest_path)
@@ -894,16 +1015,50 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                     logger.error(f"未対応の出力形式です: {actual_output_format}")
                     return False, False, estimated_size # エラーとして返す
 
-                # 画像を保存 (リトライ機構付きで)
-                def save_image_action():
-                    logger.debug(f"保存実行: {final_dest_path_str}, オプション: {save_options}")
-                    save_img.save(final_dest_path_str, **save_options)
-                    logger.info(f"保存完了: {final_dest_path_str}")
+                # アトミック書き込みの実装（一時ファイル → リネーム）
+                import tempfile
+                import uuid
+                import shutil
+                import time
+                
+                # 一時ファイルパスを生成（出力先と同一ボリューム上に作成）
+                temp_dir = dest_dir if dest_dir.exists() else tempfile.gettempdir()
+                temp_filename = f"resize_temp_{uuid.uuid4().hex}{output_ext}"
+                temp_path = temp_dir / temp_filename
+                temp_path_str = str(temp_path)
+                
+                # 画像を一時ファイルに保存
+                def save_image_to_temp():
+                    logger.debug(f"一時ファイルに保存: {temp_path_str}, オプション: {save_options}")
+                    save_img.save(temp_path_str, **save_options)
+                    return True
+                
+                # 一時ファイルを最終出力先にリネーム
+                def rename_to_final():
+                    logger.debug(f"一時ファイルを最終出力先に移動: {temp_path_str} → {final_dest_path_str}")
+                    shutil.move(temp_path_str, final_dest_path_str)
+                    return True
 
                 try:
-                    retry_on_file_error(save_image_action, max_retries=3, retry_delay=0.5)
+                    # 一時ファイルに保存
+                    success = retry_on_file_error(save_image_to_temp, max_retries=3, retry_delay=0.5)
+                    if not success:
+                        raise OSError(f"一時ファイルへの保存に失敗しました: {temp_path_str}")
+                    
+                    # 最終出力先にリネーム
+                    success = retry_on_file_error(rename_to_final, max_retries=3, retry_delay=0.5)
+                    if not success:
+                        raise OSError(f"最終出力先へのリネームに失敗しました: {final_dest_path_str}")
+                    
+                    logger.info(f"保存完了（アトミック操作）: {final_dest_path_str}")
                 except Exception as e:
-                    logger.error(f"最終的な画像保存エラー ({final_dest_path_str}): {e}")
+                    logger.error(f"画像保存エラー ({final_dest_path_str}): {e}")
+                    # 一時ファイルの削除を試みる
+                    try:
+                        if temp_path.exists():
+                            temp_path.unlink()
+                    except Exception as cleanup_error:
+                        logger.debug(f"一時ファイルのクリーンアップに失敗: {cleanup_error}")
                     return False, False, estimated_size
 
                 if is_mpo_input:
