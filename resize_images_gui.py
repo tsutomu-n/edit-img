@@ -53,6 +53,12 @@ def process_images_thread(values, dry_run=False):
     global cancel_process, update_queue
     logger.info(f"process_images_thread 開始: dry_run={dry_run}, values={values}") # 追加: スレッド開始ログ
     cancel_process = False
+    processed_count = 0
+    skipped_count = 0
+    error_count = 0
+    total_original_size = 0
+    total_processed_size = 0
+    total_reduction = 0.0 # 追加: total_reductionを初期化
     
     try:
         # パスの正規化処理
