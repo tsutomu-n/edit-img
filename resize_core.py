@@ -682,7 +682,9 @@ def find_image_files(source_dir) -> list[Path]:
         # Windows環境の場合は長いパス対応
         if os.name == 'nt':
             try:
-                norm_path = normalize_long_path(source_path)
+                # normalize_long_path は文字列を返すので、再度 Path オブジェクトに変換する
+                norm_path_str = normalize_long_path(source_path)
+                norm_path = Path(norm_path_str)
             except Exception as e:
                 logger.warning(f"パス正規化中にエラーが発生しました（通常パスを使用します）: {e}")
                 norm_path = source_path
