@@ -62,8 +62,10 @@ def process_images_thread(values, dry_run=False):
     
     try:
         # パスの正規化処理
-        source_dir = Path(core.normalize_long_path(values['source'], add_prefix=False, remove_prefix=True))
-        dest_dir = Path(core.normalize_long_path(values['dest'], add_prefix=False, remove_prefix=True))
+        source_dir_str = core.normalize_long_path(values['source'], add_prefix=False, remove_prefix=True)
+        dest_dir_str = core.normalize_long_path(values['dest'], add_prefix=False, remove_prefix=True)
+        source_dir = Path(source_dir_str)
+        dest_dir = Path(dest_dir_str)
         width = int(values['width'])
         quality = int(values['quality'])
         
@@ -100,7 +102,16 @@ def process_images_thread(values, dry_run=False):
     # 画像ファイルを検索
     try:
         update_queue.put(('status', "画像ファイルを検索中..."))
-        image_files = core.find_image_files(source_dir)
+        # PathオブジェクトでCore関数を呼び出し、stringではなくPathを確実に渡す
+        try:
+            image_files = core.find_image_files(source_dir)
+        except Exception as e:
+            logger.error(f"画像検索中にエラーが発生しました: {e}")
+            update_queue.put(('status', f"エラー: 画像検索に失敗しました - {str(e)}"))
+            update_queue.put(('btn_preview', {'disabled': False}))
+            update_queue.put(('btn_execute', {'disabled': False}))
+            update_queue.put(('btn_cancel', {'disabled': True}))
+            return
         
         if not image_files:
             update_queue.put(('status', "画像ファイルが見つかりませんでした"))
