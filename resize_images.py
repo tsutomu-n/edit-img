@@ -424,10 +424,20 @@ def main():
         # 画像ファイルを検索
         try:
             image_files = find_image_files(source_dir)
-    
-    if not image_files:
-        logger.warning(f"ディレクトリ '{args.source}' には画像ファイルが見つかりませんでした。")
-        return 0
+            
+            if not image_files:
+                logger.warning(f"ディレクトリ '{args.source}' には画像ファイルが見つかりませんでした。")
+                return 0
+        except Exception as e:
+            logger.error(f"画像ファイル検索中にエラーが発生しました: {e}")
+            return 1
+            
+    except Exception as e:
+        logger.error(f"予期せぬエラーが発生しました: {e}")
+        if DEBUG_MODE:
+            error_trace = traceback.format_exc()
+            logger.error(f"トレースバック情報:\n{error_trace}")
+        return 1
     
     # ディレクトリサイズ情報を取得
     source_size = get_directory_size(args.source)
