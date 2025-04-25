@@ -725,25 +725,40 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
             with Image.open(source_path_str) as img:
                 # 画像フォーマットの確認
                 img_format = img.format
-                SUPPORTED_FORMATS = {'JPEG', 'PNG', 'WEBP'}
-                if img_format not in SUPPORTED_FORMATS:
-                    logger.warning(f"サポートされていない入力画像フォーマット: {img_format}。処理を試みますが、予期せぬ結果になる可能性があります。")
-                    # 続行するが警告を記録
+                SUPPORTED_FORMATS = {'JPEG', 'PNG', 'WEBP'} 
+                if img_format not in SUPPORTED_FORMATS and img_format != 'MPO': 
+                     logger.warning(f"サポートされていない入力画像フォーマット: {img_format}。処理を試みますが、予期せぬ結果になる可能性があります。 - {source_path.name}")
+                     # 続行するが警告を記録
                 # 元の画像サイズ
                 original_width, original_height = img.size
                 
                 # --- 実際の出力形式を決定 --- 
                 actual_output_format = ''
+                is_mpo_input = (img_format == 'MPO') # MPO形式かどうかのフラグを追加
                 if format == 'original':
-                    # 元の形式を維持する場合、読み込んだ形式を使う
-                    actual_output_format = img_format.upper() if img_format else 'JPEG' # 不明な場合はJPEGにフォールバック
-                    # サポート外形式ならJPEGに変換
-                    if actual_output_format not in SUPPORTED_FORMATS:
-                        logger.warning(f"入力形式 {actual_output_format} は維持できません。JPEGに変換します。")
+                    # 元の形式を維持する場合
+                    if is_mpo_input:
+                        # MPOは維持できないのでJPEGとして扱い、警告を出す
+                        logger.warning(f"入力形式がMPOのため、元の形式を維持できません。JPEGとして処理します。 - {source_path.name}")
                         actual_output_format = 'JPEG'
-                else:
-                    # 特定の形式が指定された場合
+                    elif img_format and img_format.upper() in SUPPORTED_FORMATS:
+                        actual_output_format = img_format.upper()
+                    else:
+                        # サポート外または不明な形式はJPEGにフォールバック
+                        if img_format:
+                             logger.warning(f"入力形式 '{img_format}' は維持できません。JPEGに変換します。 - {source_path.name}")
+                        else:
+                             logger.warning(f"入力形式が不明です。JPEGとして処理します。 - {source_path.name}")
+                        actual_output_format = 'JPEG'
+                elif format.upper() in SUPPORTED_FORMATS:
+                    # 特定の形式が指定された場合 (WEBP含む)
                     actual_output_format = format.upper()
+                else:
+                     # 指定された形式がサポート外の場合、JPEGにフォールバック
+                     logger.warning(f"指定された出力形式 '{format}' はサポートされていません。JPEGとして処理します。")
+                     actual_output_format = 'JPEG'
+
+                logger.info(f"決定された出力形式: {actual_output_format}")
                 # --- 出力形式決定ここまで ---
                 
                 # 既に十分小さい場合はリサイズ不要
@@ -891,6 +906,13 @@ def resize_and_compress_image(source_path, dest_path, target_width, quality, for
                     logger.error(f"最終的な画像保存エラー ({final_dest_path_str}): {e}")
                     return False, False, estimated_size
 
+                if is_mpo_input:
+                    logger.info(f"MPO形式のファイルをJPEGとして保存処理を実行します: {final_dest_path.name}")
+
+                if save_img.mode != 'RGB':
+                    logger.debug(f"JPEG保存のためRGBモードに変換中 (元: {save_img.mode})")
+                    save_img = save_img.convert('RGB')
+                
                 return True, keep_original_size, estimated_size
                 
         except UnidentifiedImageError:
@@ -940,7 +962,7 @@ def adjust_quality_by_balance(quality, balance, format):
     
     Args:
         quality: 元の品質値 (1-100)
-        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質)
+        balance: 圧縮と品質のバランス (1-10, 1=最高圧縮率, 10=最高品質) - 現在は主に品質調整に使用
         format: 出力形式 ('jpeg', 'png', 'webp')
         
     Returns:
