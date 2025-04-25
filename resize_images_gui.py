@@ -502,10 +502,10 @@ def main():
             ])],
             
             # アクションボタン
-            [eg.Button("プレビュー", key="btn_preview", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1)), 
-             eg.Button("実行", key="btn_execute", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1), disabled=settings.get('preview_mode', True)),
-             eg.Button("キャンセル", key="btn_cancel", button_color=('white', '#FF0000'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1), disabled=True),
-             eg.Button("終了", key="exit", button_color=('white', '#AAAAAA'), font=('Noto Sans CJK JP', 10, 'bold'), border_width=0, size=(10, 1))]
+            [eg.Button("プレビュー", key="btn_preview", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1)), 
+             eg.Button("実行", key="btn_execute", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1), disabled=settings.get('preview_mode', True)),
+             eg.Button("キャンセル", key="btn_cancel", button_color=('white', '#FF0000'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1), disabled=True),
+             eg.Button("終了", key="exit", button_color=('white', '#AAAAAA'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1))]
         ]
         
         # ウィンドウ作成
