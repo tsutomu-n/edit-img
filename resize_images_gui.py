@@ -51,6 +51,7 @@ def process_images_thread(values, dry_run=False):
         dry_run: プレビューモード（True）か実行モード（False）か
     """
     global cancel_process, update_queue
+    logger.info(f"process_images_thread 開始: dry_run={dry_run}, values={values}") # 追加: スレッド開始ログ
     cancel_process = False
     
     try:
@@ -313,9 +314,8 @@ def process_images_thread(values, dry_run=False):
         
         # 処理完了時のUIリセット
         update_queue.put(('btn_preview', {'disabled': False}))
-        update_queue.put(('btn_execute', {'disabled': values.get('preview_mode', True)}))
+        update_queue.put(('btn_execute', {'disabled': values.get('preview_mode', False)}))
         update_queue.put(('btn_cancel', {'disabled': True}))
-
 
 def setup_logger():
     """
@@ -373,7 +373,7 @@ def load_settings():
         'format_webp': False,
         'balance': 5,
         'keep_exif': True,
-        'preview_mode': True,  # デフォルトはプレビューモード
+        'preview_mode': False,  # デフォルトはプレビューモードを無効にする
     }
     
     if not SETTINGS_FILE.exists():
@@ -487,7 +487,7 @@ def main():
             [eg.Frame('オプション', [
                 # メタデータオプション
                 [eg.Checkbox('EXIFメタデータを保持', default=settings.get('keep_exif', True), key='keep_exif')],
-                [eg.Checkbox("プレビューモード（ファイルを実際に保存しません）", default=settings.get('preview_mode', True), 
+                [eg.Checkbox("プレビューモード（ファイルを実際に保存しません）", default=settings.get('preview_mode', False), 
                              key="preview_mode")],
             ])],
             
@@ -503,7 +503,7 @@ def main():
             
             # アクションボタン
             [eg.Button("プレビュー", key="btn_preview", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1)), 
-             eg.Button("実行", key="btn_execute", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1), disabled=settings.get('preview_mode', True)),
+             eg.Button("実行", key="btn_execute", button_color=('white', '#007ACC'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1), disabled=settings.get('preview_mode', False)),
              eg.Button("キャンセル", key="btn_cancel", button_color=('white', '#FF0000'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1), disabled=True),
              eg.Button("終了", key="exit", button_color=('white', '#AAAAAA'), font=('Noto Sans CJK JP', 10, 'bold'), size=(10, 1))]
         ]
@@ -555,6 +555,7 @@ def main():
                 
             # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
+            logger.debug(f"Event received: {event}") # 追加: イベント受信ログ
             
             # スライダー値の表示を更新
             if 'width' in values:
@@ -565,75 +566,111 @@ def main():
                 balance_text = "ファイルサイズ優先" if values['balance'] < 4 else "バランス" if values['balance'] < 7 else "画質優先"
                 window['balance_value'].update(f"バランス: {int(values['balance'])} ({balance_text})")
             
-            if event in (eg.WINDOW_CLOSED, '終了'):
-                # 設定を保存
-                save_settings(values)
+            if event in (eg.WINDOW_CLOSED, 'exit'):
+                logger.info("ウィンドウが閉じられたか、終了ボタンが押されました。")
                 break
-                
-            elif event == 'プレビューモード':
-                # プレビューモードの切り替え時の処理
-                window['実行'].update(disabled=values['プレビューモード'])
-                
-                # 適切なボタンを強調表示
-                if values['プレビューモード']:
-                    window['プレビュー'].update(button_color=('white', '#007ACC'))  # 緑色強調
-                    window['実行'].update(button_color=('white', '#AAAAAA'))  # グレー化
-                else:
-                    window['プレビュー'].update(button_color=('white', '#AAAAAA'))  # グレー化
-                    window['実行'].update(button_color=('white', '#007ACC'))  # 青色強調
-                
-            elif event == 'プレビュー' or event == '実行':
-                # プレビューか実行かの判定
-                is_preview = event == 'プレビュー'
-                # 入力値の検証
-                source_dir = values['入力フォルダ']
-                dest_dir = values['出力フォルダ']
-                
-                # プレビューモードの場合はチェックボックスを強制的にオン
+            
+            # プレビューモード チェックボックス
+            elif event == 'preview_mode':
+                logger.debug(f"preview_mode チェックボックス変更: {values['preview_mode']}") # 追加
+                # プレビューモードのチェック状態に応じて実行ボタンの状態を更新
+                is_preview = values['preview_mode']
+                window['btn_execute'].update(disabled=is_preview)
+                # ボタンの色も更新して視覚的にわかりやすくする（任意）
                 if is_preview:
-                    values['プレビューモード'] = True
-                    window['プレビューモード'].update(True)
+                    window['btn_execute'].update(button_color=('white', '#AAAAAA')) # グレーアウト
+                else:
+                     window['btn_execute'].update(button_color=('white', '#007ACC')) # 元の色
+                logger.debug(f"実行ボタンの状態更新: disabled={is_preview}") # 追加
                 
-                if not os.path.exists(source_dir):
-                    eg.popup_error(f'入力フォルダが見つかりません: {source_dir}')
-                    continue
+            elif event == 'btn_preview' or event == 'btn_execute':
+                logger.info(f"{event} ボタンクリック検知") # 追加
+                # プレビューか実行かの判定
+                is_preview = event == 'btn_preview'
+                logger.debug(f"is_preview = {is_preview}") # 追加
+                
+                # 入力値の取得と検証
+                try:
+                    source_dir = values['source']
+                    dest_dir = values['dest']
+                    logger.debug(f"入力フォルダ: {source_dir}, 出力フォルダ: {dest_dir}") # 追加
                     
-                # 出力フォルダ作成確認
-                if not os.path.exists(dest_dir):
-                    if eg.popup_yes_no(f'出力フォルダ {dest_dir} が存在しません。作成しますか？') == 'Yes':
-                        try:
-                            os.makedirs(dest_dir, exist_ok=True)
-                        except Exception as e:
-                            error_trace = traceback.format_exc()
-                            logger.error(f"出力フォルダの作成に失敗: {e}\n{error_trace}")
-                            eg.popup_error(f'フォルダを作成できませんでした: {e}')
-                            continue
-                    else:
+                    # プレビューモードの場合はチェックボックスを強制的にオン
+                    if is_preview:
+                        logger.debug("プレビューモードのため、チェックボックスを強制的にオンにします") # 追加
+                        values['preview_mode'] = True
+                        window['preview_mode'].update(True)
+                    
+                    if not source_dir or not Path(source_dir).exists():
+                        logger.warning(f"入力フォルダが見つからないか空です: {source_dir}") # 追加
+                        eg.popup_error(f'入力フォルダが見つかりません: {source_dir}')
                         continue
+                    logger.debug("入力フォルダ OK") # 追加
                         
-                # UI状態更新
-                window['プレビュー'].update(disabled=True)
-                window['実行'].update(disabled=True)
-                window['キャンセル'].update(disabled=False)
+                    # 出力フォルダ作成確認
+                    if not dest_dir:
+                        logger.warning("出力フォルダが指定されていません") # 追加
+                        eg.popup_error('出力フォルダを指定してください。')
+                        continue
+                    dest_path = Path(dest_dir)
+                    if not dest_path.exists():
+                        logger.info(f"出力フォルダが存在しないため作成確認: {dest_dir}") # 追加
+                        if eg.popup_yes_no(f'出力フォルダ {dest_dir} が存在しません。作成しますか？') == 'Yes':
+                            try:
+                                dest_path.mkdir(parents=True, exist_ok=True)
+                                logger.info(f"出力フォルダを作成しました: {dest_dir}") # 追加
+                            except Exception as e:
+                                error_trace = traceback.format_exc()
+                                logger.error(f"出力フォルダの作成に失敗: {e}\n{error_trace}")
+                                eg.popup_error(f'フォルダを作成できませんでした: {e}')
+                                continue
+                        else:
+                            logger.info("出力フォルダの作成がキャンセルされました") # 追加
+                            continue
+                    logger.debug("出力フォルダ OK") # 追加
+                        
+                    # UI状態更新 (処理開始前)
+                    logger.debug("UIを処理中状態に更新します") # 追加
+                    window['btn_preview'].update(disabled=True)
+                    window['btn_execute'].update(disabled=True)
+                    window['btn_cancel'].update(disabled=False)
+                    
+                    # モードに応じたステータス表示
+                    mode_prefix = "【プレビュー】" if is_preview else "【実行】"
+                    status_text = f"{mode_prefix}処理準備中... 幅: {int(values['width'])}px, 品質: {int(values['quality'])}%"
+                    window['status'].update(status_text)
+                    logger.info(status_text) # 追加
+                    
+                    # 別スレッドで処理実行
+                    logger.debug("画像処理スレッドを開始します") # 追加
+                    processing_thread = threading.Thread(
+                        target=process_images_thread,
+                        args=(values, is_preview),  
+                        daemon=True
+                    )
+                    processing_thread.start()
+                    logger.debug("画像処理スレッドを開始しました") # 追加
                 
-                # モードに応じたステータス表示
-                mode_prefix = "【プレビュー】" if is_preview else ""
-                window['ステータス'].update(f"{mode_prefix}処理準備中... 幅: {int(values['幅'])}px, 品質: {int(values['品質'])}%")
+                except Exception as e:
+                     logger.error(f"{event} ボタン処理中に予期せぬエラー: {e}", exc_info=True) # 追加
+                     eg.popup_error(f"処理開始中にエラーが発生しました: {e}")
+                     # エラー発生時もボタンを元に戻す試み (必要に応じて)
+                     # window['btn_preview'].update(disabled=False)
+                     # window['btn_execute'].update(disabled=values.get('preview_mode', False))
+                     # window['btn_cancel'].update(disabled=True)
                 
-                # 別スレッドで処理実行
-                processing_thread = threading.Thread(
-                    target=process_images_thread,
-                    args=(values, is_preview),  
-                    daemon=True
-                )
-                processing_thread.start()
-                
-            elif event == 'キャンセル':
+            elif event == 'btn_cancel':
+                logger.info("キャンセルボタンクリック検知") # 追加
                 cancel_process = True
-                window['ステータス'].update("キャンセル中...")
+                window['status'].update("キャンセル中...")
+        
+        # ウィンドウ終了前に設定を保存
+        logger.info("ウィンドウ終了処理開始。設定を保存します。")
+        save_settings(values) # 現在の値を保存
         
         # ウィンドウを閉じる
         window.close()
+        logger.info("ウィンドウを閉じました。")
     except Exception as e:
         # 未処理の例外をログに記録
         error_trace = traceback.format_exc()
