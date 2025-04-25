@@ -561,7 +561,7 @@ def main():
                 
             # GUIイベントを読み取る
             event, values = window.read(timeout=100)  # タイムアウトでGUIを応答的に
-            if event != eg.TIMEOUT_EVENT: # Ignore TIMEOUT events
+            if event != eg.TIMEOUT_KEY: # Ignore TIMEOUT events
                 logger.debug(f"Event received: {event}") # 追加: イベント受信ログ
             
             # スライダー値の表示を更新
