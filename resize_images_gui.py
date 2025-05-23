@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import filedialog
+from tkinter import filedialog, TclError
 from pathlib import Path
 
 # 日本語フォント設定モジュールをインポート
@@ -60,10 +60,27 @@ class App(ctk.CTk):
         self.tab_view = ctk.CTkTabview(self.main_frame, corner_radius=8)
         self.tab_view.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
 
-        # タブ見出しにヘディングフォントを適用
-        self.tab_resize = self.tab_view.add("リサイズ", font=self.heading_font)
-        self.tab_compress = self.tab_view.add("圧縮", font=self.heading_font)
-        self.tab_batch = self.tab_view.add("一括処理", font=self.heading_font)
+        # タブを追加
+        self.tab_resize = self.tab_view.add("リサイズ")
+        self.tab_compress = self.tab_view.add("圧縮")
+        self.tab_batch = self.tab_view.add("一括処理")
+        
+        # タブのフォント設定を試行
+        try:
+            # 方法1: segmented_buttonの各タブにフォントを設定
+            if hasattr(self.tab_view, "_segmented_button"):
+                for tab_name in ["リサイズ", "圧縮", "一括処理"]:
+                    self.tab_view._segmented_button.configure_tab(tab_name, font=self.heading_font)
+        except (AttributeError, TclError) as e:
+            # エラーの場合はデバッグ情報を記録
+            print(f"タブフォント設定エラー: {e}")
+            
+        # 方法2: タブのテキスト表示に影響する可能性のある他の方法を試行
+        try:
+            # 全体のtkinterフォントを設定
+            self.option_add("*Font", self.heading_font)
+        except Exception:
+            pass
 
         self.resize_value_unit_label = None
         self.resize_quality_text_label = None
