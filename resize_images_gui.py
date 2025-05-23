@@ -43,7 +43,14 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("画像処理ツール")
+        
+        # ウィンドウサイズを設定
         self.geometry("1000x800")
+        self.minsize(900, 700)  # 最小サイズを設定
+        
+        # フレームの拡大性を確保するためにgridを設定
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
         # フォント設定の初期化
         self.normal_font = ctk.CTkFont(**get_normal_font())
@@ -429,12 +436,21 @@ class App(ctk.CTk):
         self.progress_bar.set(value)
 
     def center_window(self):
+        """Windows環境でも正しく動作するよう修正した中央配置メソッド"""
         self.update_idletasks()
-        width = self.winfo_width()
-        height = self.winfo_height()
+        
+        # サイズが小さすぎる場合は最小値を適用
+        width = max(self.winfo_width(), 1000)
+        height = max(self.winfo_height(), 800)
+        
         x = (self.winfo_screenwidth() // 2) - (width // 2)
         y = (self.winfo_screenheight() // 2) - (height // 2)
+        
+        # 位置とサイズを設定
         self.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # 再度サイズを確定させる
+        self.update_idletasks()
 
     def start_resize_process(self):
         self.add_log_message("リサイズ処理を開始します...")
