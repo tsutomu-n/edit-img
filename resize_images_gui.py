@@ -3,6 +3,15 @@ from tkinter import filedialog
 from pathlib import Path
 import os
 
+# 日本語フォント設定モジュールをインポート
+try:
+    from japanese_font_utils import get_normal_font, get_button_font, get_heading_font
+except ImportError:
+    # フォールバック用の簡易フォント設定
+    def get_normal_font(): return {"family": "", "size": 11}
+    def get_button_font(): return {"family": "", "size": 11, "weight": "bold"}
+    def get_heading_font(): return {"family": "", "size": 13, "weight": "bold"}
+
 try:
     from resize_core import resize_and_compress_image, get_destination_path, sanitize_filename
 except ImportError:
@@ -23,6 +32,11 @@ class App(ctk.CTk):
 
         self.title("画像処理ツール")
         self.geometry("1000x800")
+        
+        # フォント設定の初期化
+        self.normal_font = ctk.CTkFont(**get_normal_font())
+        self.button_font = ctk.CTkFont(**get_button_font())
+        self.heading_font = ctk.CTkFont(**get_heading_font())
 
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -120,21 +134,21 @@ class App(ctk.CTk):
         
         current_row = 0
 
-        ctk.CTkLabel(self.resize_tab_content, text="入力ファイル:").grid(row=current_row, column=0, padx=(10,5), pady=10, sticky="w")
+        ctk.CTkLabel(self.resize_tab_content, text="入力ファイル:", font=self.normal_font).grid(row=current_row, column=0, padx=(10,5), pady=10, sticky="w")
         self.resize_input_file_entry = ctk.CTkEntry(self.resize_tab_content)
         self.resize_input_file_entry.grid(row=current_row, column=1, padx=5, pady=10, sticky="ew")
         self.resize_input_file_button = ctk.CTkButton(
-            self.resize_tab_content, text="選択...", width=80,
+            self.resize_tab_content, text="選択...", width=80, font=self.button_font,
             command=lambda: self._select_file(self.resize_input_file_entry, title="入力ファイルを選択")
         )
         self.resize_input_file_button.grid(row=current_row, column=2, padx=(5,10), pady=10, sticky="e")
         current_row += 1
 
-        ctk.CTkLabel(self.resize_tab_content, text="出力先フォルダ:").grid(row=current_row, column=0, padx=(10,5), pady=10, sticky="w")
+        ctk.CTkLabel(self.resize_tab_content, text="出力先フォルダ:", font=self.normal_font).grid(row=current_row, column=0, padx=(10,5), pady=10, sticky="w")
         self.resize_output_dir_entry = ctk.CTkEntry(self.resize_tab_content)
         self.resize_output_dir_entry.grid(row=current_row, column=1, padx=5, pady=10, sticky="ew")
         self.resize_output_dir_button = ctk.CTkButton(
-            self.resize_tab_content, text="選択...", width=80,
+            self.resize_tab_content, text="選択...", width=80, font=self.button_font,
             command=lambda: self._select_directory(self.resize_output_dir_entry, title="出力先フォルダを選択")
         )
         self.resize_output_dir_button.grid(row=current_row, column=2, padx=(5,10), pady=10, sticky="e")
@@ -198,12 +212,14 @@ class App(ctk.CTk):
         action_buttons_frame.grid_columnconfigure(3, weight=1) 
 
         self.resize_start_button = ctk.CTkButton(
-            action_buttons_frame, text="処理開始", command=self.start_resize_process, width=120
+            action_buttons_frame, text="処理開始", command=self.start_resize_process, width=120,
+            font=self.button_font
         )
         self.resize_start_button.grid(row=0, column=1, padx=5, pady=5)
 
         self.resize_cancel_button = ctk.CTkButton(
-            action_buttons_frame, text="中断", command=self.cancel_resize_process, state="disabled", width=120
+            action_buttons_frame, text="中断", command=self.cancel_resize_process, state="disabled", width=120,
+            font=self.button_font
         )
         self.resize_cancel_button.grid(row=0, column=2, padx=5, pady=5)
         current_row += 1
