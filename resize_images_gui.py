@@ -1,26 +1,38 @@
 import customtkinter as ctk
 from tkinter import filedialog
 from pathlib import Path
-import os
 
 # 日本語フォント設定モジュールをインポート
 try:
     from japanese_font_utils import get_normal_font, get_button_font, get_heading_font
 except ImportError:
     # フォールバック用の簡易フォント設定
-    def get_normal_font(): return {"family": "", "size": 11}
-    def get_button_font(): return {"family": "", "size": 11, "weight": "bold"}
-    def get_heading_font(): return {"family": "", "size": 13, "weight": "bold"}
+    def get_normal_font():
+        return {"family": "", "size": 11}
+
+    def get_button_font():
+        return {"family": "", "size": 11, "weight": "bold"}
+
+    def get_heading_font():
+        return {"family": "", "size": 13, "weight": "bold"}
+
 
 try:
-    from resize_core import resize_and_compress_image, get_destination_path, sanitize_filename
+    from resize_core import (
+        resize_and_compress_image,
+        get_destination_path,
+        sanitize_filename,
+    )
 except ImportError:
+
     def resize_and_compress_image(*args, **kwargs):
         print("ダミー: resize_and_compress_image")
         return True, True, "ダミー処理成功"
+
     def get_destination_path(source_path, source_dir, dest_dir):
         print("ダミー: get_destination_path")
         return Path(dest_dir) / Path(source_path).name
+
     def sanitize_filename(filename):
         print("ダミー: sanitize_filename")
         return filename
@@ -32,7 +44,7 @@ class App(ctk.CTk):
 
         self.title("画像処理ツール")
         self.geometry("1000x800")
-        
+
         # フォント設定の初期化
         self.normal_font = ctk.CTkFont(**get_normal_font())
         self.button_font = ctk.CTkFont(**get_button_font())
@@ -48,9 +60,10 @@ class App(ctk.CTk):
         self.tab_view = ctk.CTkTabview(self.main_frame, corner_radius=8)
         self.tab_view.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
 
-        self.tab_resize = self.tab_view.add("リサイズ")
-        self.tab_compress = self.tab_view.add("圧縮")
-        self.tab_batch = self.tab_view.add("一括処理")
+        # タブ見出しにヘディングフォントを適用
+        self.tab_resize = self.tab_view.add("リサイズ", font=self.heading_font)
+        self.tab_compress = self.tab_view.add("圧縮", font=self.heading_font)
+        self.tab_batch = self.tab_view.add("一括処理", font=self.heading_font)
 
         self.resize_value_unit_label = None
         self.resize_quality_text_label = None
@@ -69,7 +82,8 @@ class App(ctk.CTk):
             height=120,
             corner_radius=6,
             wrap="word",
-            state="disabled"
+            state="disabled",
+            font=self.normal_font,
         )
         self.log_textbox.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
@@ -79,12 +93,28 @@ class App(ctk.CTk):
 
         self.center_window()
 
-    def _select_file(self, entry_widget, title="ファイルを選択", filetypes=(("画像ファイル", "*.jpg *.jpeg *.png *.gif *.bmp *.tiff"), ("すべてのファイル", "*.*"))):
+    def _select_file(
+        self,
+        entry_widget,
+        title="ファイルを選択",
+        filetypes=(
+            ("画像ファイル", "*.jpg *.jpeg *.png *.gif *.bmp *.tiff"),
+            ("すべてのファイル", "*.*"),
+        ),
+    ):
         filepath = filedialog.askopenfilename(title=title, filetypes=filetypes)
         if filepath:
             entry_widget.delete(0, "end")
             entry_widget.insert(0, filepath)
             self.add_log_message(f"ファイル選択: {filepath}")
+
+    def _select_directory(self, entry_widget, title="フォルダを選択"):
+        """ディレクトリ選択ダイアログを表示し、選択されたパスをエントリーに設定する"""
+        dirpath = filedialog.askdirectory(title=title)
+        if dirpath:
+            entry_widget.delete(0, "end")
+            entry_widget.insert(0, dirpath)
+            self.add_log_message(f"フォルダ選択: {dirpath}")
 
     def on_output_format_change(self, selected_format):
         self.add_log_message(f"出力フォーマット変更: {selected_format}")
@@ -115,111 +145,209 @@ class App(ctk.CTk):
 
     def on_resize_mode_change(self, selected_mode):
         self.add_log_message(f"リサイズモード変更: {selected_mode}")
-        if hasattr(self, 'resize_value_unit_label') and self.resize_value_unit_label:
+        if hasattr(self, "resize_value_unit_label") and self.resize_value_unit_label:
             if selected_mode == "パーセント":
                 self.resize_value_unit_label.configure(text="%")
             else:
                 self.resize_value_unit_label.configure(text="px")
 
-        if hasattr(self, 'resize_value_entry'):
+        if hasattr(self, "resize_value_entry"):
             self.resize_value_entry.delete(0, "end")
 
     def create_tab_content_frames(self):
-        self.resize_tab_content = ctk.CTkFrame(self.tab_resize, corner_radius=0, fg_color="transparent")
+        self.resize_tab_content = ctk.CTkFrame(
+            self.tab_resize, corner_radius=0, fg_color="transparent"
+        )
         self.resize_tab_content.pack(fill="both", expand=True)
 
-        self.resize_tab_content.grid_columnconfigure(0, weight=0) 
+        self.resize_tab_content.grid_columnconfigure(0, weight=0)
         self.resize_tab_content.grid_columnconfigure(1, weight=1)
         self.resize_tab_content.grid_columnconfigure(2, weight=0)
-        
+
         current_row = 0
 
-        ctk.CTkLabel(self.resize_tab_content, text="入力ファイル:", font=self.normal_font).grid(row=current_row, column=0, padx=(10,5), pady=10, sticky="w")
-        self.resize_input_file_entry = ctk.CTkEntry(self.resize_tab_content)
-        self.resize_input_file_entry.grid(row=current_row, column=1, padx=5, pady=10, sticky="ew")
-        self.resize_input_file_button = ctk.CTkButton(
-            self.resize_tab_content, text="選択...", width=80, font=self.button_font,
-            command=lambda: self._select_file(self.resize_input_file_entry, title="入力ファイルを選択")
+        ctk.CTkLabel(
+            self.resize_tab_content, text="入力ファイル:", font=self.normal_font
+        ).grid(row=current_row, column=0, padx=(10, 5), pady=10, sticky="w")
+        self.resize_input_file_entry = ctk.CTkEntry(
+            self.resize_tab_content, font=self.normal_font
         )
-        self.resize_input_file_button.grid(row=current_row, column=2, padx=(5,10), pady=10, sticky="e")
+        self.resize_input_file_entry.grid(
+            row=current_row, column=1, padx=5, pady=10, sticky="ew"
+        )
+        self.resize_input_file_button = ctk.CTkButton(
+            self.resize_tab_content,
+            text="選択...",
+            width=80,
+            font=self.button_font,
+            command=lambda: self._select_file(
+                self.resize_input_file_entry, title="入力ファイルを選択"
+            ),
+        )
+        self.resize_input_file_button.grid(
+            row=current_row, column=2, padx=(5, 10), pady=10, sticky="e"
+        )
         current_row += 1
 
-        ctk.CTkLabel(self.resize_tab_content, text="出力先フォルダ:", font=self.normal_font).grid(row=current_row, column=0, padx=(10,5), pady=10, sticky="w")
-        self.resize_output_dir_entry = ctk.CTkEntry(self.resize_tab_content)
-        self.resize_output_dir_entry.grid(row=current_row, column=1, padx=5, pady=10, sticky="ew")
-        self.resize_output_dir_button = ctk.CTkButton(
-            self.resize_tab_content, text="選択...", width=80, font=self.button_font,
-            command=lambda: self._select_directory(self.resize_output_dir_entry, title="出力先フォルダを選択")
+        ctk.CTkLabel(
+            self.resize_tab_content, text="出力先フォルダ:", font=self.normal_font
+        ).grid(row=current_row, column=0, padx=(10, 5), pady=10, sticky="w")
+        self.resize_output_dir_entry = ctk.CTkEntry(
+            self.resize_tab_content, font=self.normal_font
         )
-        self.resize_output_dir_button.grid(row=current_row, column=2, padx=(5,10), pady=10, sticky="e")
+        self.resize_output_dir_entry.grid(
+            row=current_row, column=1, padx=5, pady=10, sticky="ew"
+        )
+        self.resize_output_dir_button = ctk.CTkButton(
+            self.resize_tab_content,
+            text="選択...",
+            width=80,
+            font=self.button_font,
+            command=lambda: self._select_directory(
+                self.resize_output_dir_entry, title="出力先フォルダを選択"
+            ),
+        )
+        self.resize_output_dir_button.grid(
+            row=current_row, column=2, padx=(5, 10), pady=10, sticky="e"
+        )
         current_row += 1
 
         resize_settings_frame = ctk.CTkFrame(self.resize_tab_content)
-        resize_settings_frame.grid(row=current_row, column=0, columnspan=3, padx=10, pady=(10,0), sticky="ew")
-        resize_settings_frame.grid_columnconfigure(1, weight=1) 
-        
+        resize_settings_frame.grid(
+            row=current_row, column=0, columnspan=3, padx=10, pady=(10, 0), sticky="ew"
+        )
+        resize_settings_frame.grid_columnconfigure(1, weight=1)
+
         rs_current_row = 0
-        ctk.CTkLabel(resize_settings_frame, text="リサイズモード:").grid(row=rs_current_row, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(
+            resize_settings_frame, text="リサイズモード:", font=self.normal_font
+        ).grid(row=rs_current_row, column=0, padx=5, pady=5, sticky="w")
         self.resize_mode_options = ["パーセント", "幅指定", "高さ指定"]
         self.resize_mode_var = ctk.StringVar(value=self.resize_mode_options[0])
         self.resize_mode_menu = ctk.CTkOptionMenu(
-            resize_settings_frame, values=self.resize_mode_options, variable=self.resize_mode_var, command=self.on_resize_mode_change
+            resize_settings_frame,
+            values=self.resize_mode_options,
+            variable=self.resize_mode_var,
+            command=self.on_resize_mode_change,
+            font=self.normal_font,
+            dropdown_font=self.normal_font,
         )
-        self.resize_mode_menu.grid(row=rs_current_row, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        self.resize_mode_menu.grid(
+            row=rs_current_row, column=1, columnspan=2, padx=5, pady=5, sticky="ew"
+        )
         rs_current_row += 1
 
-        ctk.CTkLabel(resize_settings_frame, text="値:").grid(row=rs_current_row, column=0, padx=5, pady=5, sticky="w")
-        self.resize_value_entry = ctk.CTkEntry(resize_settings_frame)
-        self.resize_value_entry.grid(row=rs_current_row, column=1, padx=5, pady=5, sticky="ew")
-        self.resize_value_unit_label = ctk.CTkLabel(resize_settings_frame, text="%")
-        self.resize_value_unit_label.grid(row=rs_current_row, column=2, padx=(0,5), pady=5, sticky="w")
+        ctk.CTkLabel(resize_settings_frame, text="値:", font=self.normal_font).grid(
+            row=rs_current_row, column=0, padx=5, pady=5, sticky="w"
+        )
+        self.resize_value_entry = ctk.CTkEntry(
+            resize_settings_frame, font=self.normal_font
+        )
+        self.resize_value_entry.grid(
+            row=rs_current_row, column=1, padx=5, pady=5, sticky="ew"
+        )
+        self.resize_value_unit_label = ctk.CTkLabel(
+            resize_settings_frame, text="%", font=self.normal_font
+        )
+        self.resize_value_unit_label.grid(
+            row=rs_current_row, column=2, padx=(0, 5), pady=5, sticky="w"
+        )
         rs_current_row += 1
 
         self.resize_aspect_ratio_var = ctk.BooleanVar(value=True)
         self.resize_aspect_ratio_checkbox = ctk.CTkCheckBox(
-            resize_settings_frame, text="アスペクト比を維持", variable=self.resize_aspect_ratio_var
+            resize_settings_frame,
+            text="アスペクト比を維持",
+            variable=self.resize_aspect_ratio_var,
+            font=self.normal_font,
         )
-        self.resize_aspect_ratio_checkbox.grid(row=rs_current_row, column=0, columnspan=3, padx=5, pady=(5,10), sticky="w")
+        self.resize_aspect_ratio_checkbox.grid(
+            row=rs_current_row, column=0, columnspan=3, padx=5, pady=(5, 10), sticky="w"
+        )
         rs_current_row += 1
 
-        ctk.CTkLabel(resize_settings_frame, text="出力フォーマット:").grid(row=rs_current_row, column=0, padx=5, pady=5, sticky="w")
-        self.resize_output_format_options = ["元のフォーマットを維持", "PNG", "JPEG", "WEBP"]
-        self.resize_output_format_var = ctk.StringVar(value=self.resize_output_format_options[0])
+        ctk.CTkLabel(
+            resize_settings_frame, text="出力フォーマット:", font=self.normal_font
+        ).grid(row=rs_current_row, column=0, padx=5, pady=5, sticky="w")
+        self.resize_output_format_options = [
+            "元のフォーマットを維持",
+            "PNG",
+            "JPEG",
+            "WEBP",
+        ]
+        self.resize_output_format_var = ctk.StringVar(
+            value=self.resize_output_format_options[0]
+        )
         self.resize_output_format_menu = ctk.CTkOptionMenu(
-            resize_settings_frame, values=self.resize_output_format_options, variable=self.resize_output_format_var, command=self.on_output_format_change
+            resize_settings_frame,
+            values=self.resize_output_format_options,
+            variable=self.resize_output_format_var,
+            command=self.on_output_format_change,
+            font=self.normal_font,
+            dropdown_font=self.normal_font,
         )
-        self.resize_output_format_menu.grid(row=rs_current_row, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        self.resize_output_format_menu.grid(
+            row=rs_current_row, column=1, columnspan=2, padx=5, pady=5, sticky="ew"
+        )
         rs_current_row += 1
 
-        self.resize_quality_text_label = ctk.CTkLabel(resize_settings_frame, text="品質 (JPEG/WEBP):")
-        self.resize_quality_text_label.grid(row=rs_current_row, column=0, padx=5, pady=5, sticky="w")
+        self.resize_quality_text_label = ctk.CTkLabel(
+            resize_settings_frame, text="品質 (JPEG/WEBP):", font=self.normal_font
+        )
+        self.resize_quality_text_label.grid(
+            row=rs_current_row, column=0, padx=5, pady=5, sticky="w"
+        )
         self.resize_quality_var = ctk.IntVar(value=85)
         self.resize_quality_slider = ctk.CTkSlider(
-            resize_settings_frame, from_=1, to=100, number_of_steps=99, variable=self.resize_quality_var, command=self.update_quality_label
+            resize_settings_frame,
+            from_=1,
+            to=100,
+            number_of_steps=99,
+            variable=self.resize_quality_var,
+            command=self.update_quality_label,
         )
-        self.resize_quality_slider.grid(row=rs_current_row, column=1, padx=5, pady=5, sticky="ew")
-        self.resize_quality_value_label = ctk.CTkLabel(resize_settings_frame, text=str(self.resize_quality_var.get()))
-        self.resize_quality_value_label.grid(row=rs_current_row, column=2, padx=(5,10), pady=5, sticky="w")
+        self.resize_quality_slider.grid(
+            row=rs_current_row, column=1, padx=5, pady=5, sticky="ew"
+        )
+        self.resize_quality_value_label = ctk.CTkLabel(
+            resize_settings_frame,
+            text=str(self.resize_quality_var.get()),
+            font=self.normal_font,
+        )
+        self.resize_quality_value_label.grid(
+            row=rs_current_row, column=2, padx=(5, 10), pady=5, sticky="w"
+        )
         rs_current_row += 1
-        
-        current_row += 1 # resize_settings_frame の分
 
-        action_buttons_frame = ctk.CTkFrame(self.resize_tab_content, fg_color="transparent")
-        action_buttons_frame.grid(row=current_row, column=0, columnspan=3, padx=10, pady=(10,0), sticky="ew")
-        action_buttons_frame.grid_columnconfigure(0, weight=1) 
-        action_buttons_frame.grid_columnconfigure(1, weight=0) # Start button column
-        action_buttons_frame.grid_columnconfigure(2, weight=0) # Cancel button column
-        action_buttons_frame.grid_columnconfigure(3, weight=1) 
+        current_row += 1  # resize_settings_frame の分
+
+        action_buttons_frame = ctk.CTkFrame(
+            self.resize_tab_content, fg_color="transparent"
+        )
+        action_buttons_frame.grid(
+            row=current_row, column=0, columnspan=3, padx=10, pady=(10, 0), sticky="ew"
+        )
+        action_buttons_frame.grid_columnconfigure(0, weight=1)
+        action_buttons_frame.grid_columnconfigure(1, weight=0)  # Start button column
+        action_buttons_frame.grid_columnconfigure(2, weight=0)  # Cancel button column
+        action_buttons_frame.grid_columnconfigure(3, weight=1)
 
         self.resize_start_button = ctk.CTkButton(
-            action_buttons_frame, text="処理開始", command=self.start_resize_process, width=120,
-            font=self.button_font
+            action_buttons_frame,
+            text="処理開始",
+            command=self.start_resize_process,
+            width=120,
+            font=self.button_font,
         )
         self.resize_start_button.grid(row=0, column=1, padx=5, pady=5)
 
         self.resize_cancel_button = ctk.CTkButton(
-            action_buttons_frame, text="中断", command=self.cancel_resize_process, state="disabled", width=120,
-            font=self.button_font
+            action_buttons_frame,
+            text="中断",
+            command=self.cancel_resize_process,
+            state="disabled",
+            width=120,
+            font=self.button_font,
         )
         self.resize_cancel_button.grid(row=0, column=2, padx=5, pady=5)
         current_row += 1
@@ -228,13 +356,25 @@ class App(ctk.CTk):
         self.on_resize_mode_change(self.resize_mode_var.get())
         self.on_output_format_change(self.resize_output_format_var.get())
 
-        self.compress_tab_content = ctk.CTkFrame(self.tab_compress, corner_radius=0, fg_color="transparent")
+        self.compress_tab_content = ctk.CTkFrame(
+            self.tab_compress, corner_radius=0, fg_color="transparent"
+        )
         self.compress_tab_content.pack(fill="both", expand=True, padx=5, pady=5)
-        ctk.CTkLabel(self.compress_tab_content, text="圧縮設定はここに配置").pack(pady=20)
+        ctk.CTkLabel(
+            self.compress_tab_content,
+            text="圧縮設定はここに配置",
+            font=self.normal_font,
+        ).pack(pady=20)
 
-        self.batch_tab_content = ctk.CTkFrame(self.tab_batch, corner_radius=0, fg_color="transparent")
+        self.batch_tab_content = ctk.CTkFrame(
+            self.tab_batch, corner_radius=0, fg_color="transparent"
+        )
         self.batch_tab_content.pack(fill="both", expand=True, padx=5, pady=5)
-        ctk.CTkLabel(self.batch_tab_content, text="一括処理設定はここに配置").pack(pady=20)
+        ctk.CTkLabel(
+            self.batch_tab_content,
+            text="一括処理設定はここに配置",
+            font=self.normal_font,
+        ).pack(pady=20)
 
     def add_log_message(self, message):
         self.log_textbox.configure(state="normal")
@@ -251,12 +391,14 @@ class App(ctk.CTk):
         height = self.winfo_height()
         x = (self.winfo_screenwidth() // 2) - (width // 2)
         y = (self.winfo_screenheight() // 2) - (height // 2)
-        self.geometry(f'{width}x{height}+{x}+{y}')
+        self.geometry(f"{width}x{height}+{x}+{y}")
 
     def start_resize_process(self):
         self.add_log_message("リサイズ処理を開始します...")
-        if self.resize_start_button: self.resize_start_button.configure(state="disabled")
-        if self.resize_cancel_button: self.resize_cancel_button.configure(state="normal")
+        if self.resize_start_button:
+            self.resize_start_button.configure(state="disabled")
+        if self.resize_cancel_button:
+            self.resize_cancel_button.configure(state="normal")
         self.update_progress(0.1)
 
         input_file_str = self.resize_input_file_entry.get()
@@ -268,28 +410,38 @@ class App(ctk.CTk):
         quality = self.resize_quality_var.get()
 
         if not input_file_str:
-            self.add_log_message("エラー: 入力ファイルが選択されていません。")
+            self.add_log_message(
+                "エラー: 入力ファイルが選択されていません。ファイルを選択してください。"
+            )
             self.finish_resize_process(success=False)
             return
         if not Path(input_file_str).is_file():
-            self.add_log_message(f"エラー: 入力ファイルが見つかりません: {input_file_str}")
+            self.add_log_message(
+                f"エラー: 入力ファイルが見つかりません: {input_file_str}\nファイルが存在するか確認してください。"
+            )
             self.finish_resize_process(success=False)
             return
         if not output_dir_str:
-            self.add_log_message("エラー: 出力先フォルダが選択されていません。")
+            self.add_log_message(
+                "エラー: 出力先フォルダが選択されていません。出力先フォルダを指定してください。"
+            )
             self.finish_resize_process(success=False)
             return
         if not Path(output_dir_str).is_dir():
-            self.add_log_message(f"エラー: 出力先フォルダが見つからないか、フォルダではありません: {output_dir_str}")
+            self.add_log_message(
+                f"エラー: 出力先フォルダが見つからないか、フォルダではありません: {output_dir_str}\n有効なフォルダを指定してください。"
+            )
             self.finish_resize_process(success=False)
             return
-        
+
         try:
             resize_value = int(resize_value_str)
             if resize_value <= 0:
                 raise ValueError("リサイズ値は正の整数である必要があります。")
         except ValueError:
-            self.add_log_message(f"エラー: リサイズ値が無効です: {resize_value_str}")
+            self.add_log_message(
+                f"エラー: リサイズ値が無効です: {resize_value_str}\n正の整数値を入力してください。"
+            )
             self.finish_resize_process(success=False)
             return
 
@@ -299,7 +451,12 @@ class App(ctk.CTk):
         mode_map = {"パーセント": "percentage", "幅指定": "width", "高さ指定": "height"}
         core_resize_mode = mode_map.get(resize_mode_gui, "percentage")
 
-        format_map = {"元のフォーマットを維持": "original", "PNG": "png", "JPEG": "jpeg", "WEBP": "webp"}
+        format_map = {
+            "元のフォーマットを維持": "original",
+            "PNG": "png",
+            "JPEG": "jpeg",
+            "WEBP": "webp",
+        }
         core_output_format = format_map.get(output_format_gui, "original")
 
         base_name = source_path.stem
@@ -307,28 +464,39 @@ class App(ctk.CTk):
             ext = f".{core_output_format.lower()}"
         else:
             ext = source_path.suffix
-        
+
         sanitized_stem = sanitize_filename(base_name)
         output_filename = sanitized_stem + ext
         dest_path = dest_dir / output_filename
 
         self.add_log_message(f"入力: {source_path}")
         self.add_log_message(f"出力先: {dest_path}")
-        self.add_log_message(f"モード: {core_resize_mode}, 値: {resize_value}, アスペクト比維持: {keep_aspect_ratio}")
-        self.add_log_message(f"フォーマット: {core_output_format}, 品質: {quality if core_output_format in ['jpeg', 'webp'] else 'N/A'}")
-        
+        self.add_log_message(
+            f"モード: {core_resize_mode}, 値: {resize_value}, アスペクト比維持: {keep_aspect_ratio}"
+        )
+        self.add_log_message(
+            f"フォーマット: {core_output_format}, 品質: {quality if core_output_format in ['jpeg', 'webp'] else 'N/A'}"
+        )
+
         self.update_progress(0.3)
 
         try:
             self.add_log_message("画像処理を実行中...")
-            self.after(2000, lambda: self.finish_resize_process(success=True, message="ダミー処理成功！"))
+            self.after(
+                2000,
+                lambda: self.finish_resize_process(
+                    success=True, message="ダミー処理成功！"
+                ),
+            )
         except Exception as e:
             self.add_log_message(f"画像処理中に予期せぬエラーが発生しました: {e}")
             self.finish_resize_process(success=False, message=str(e))
 
     def cancel_resize_process(self):
         self.add_log_message("リサイズ処理を中断しました。")
-        self.finish_resize_process(success=False, message="ユーザーにより中断されました。")
+        self.finish_resize_process(
+            success=False, message="ユーザーにより中断されました。"
+        )
 
     def finish_resize_process(self, success=True, message="処理完了"):
         if success:
@@ -338,8 +506,10 @@ class App(ctk.CTk):
             self.add_log_message(f"エラー/中断: {message}")
             self.update_progress(0)
 
-        if self.resize_start_button: self.resize_start_button.configure(state="normal")
-        if self.resize_cancel_button: self.resize_cancel_button.configure(state="disabled")
+        if self.resize_start_button:
+            self.resize_start_button.configure(state="normal")
+        if self.resize_cancel_button:
+            self.resize_cancel_button.configure(state="disabled")
 
 
 def main():
@@ -348,6 +518,7 @@ def main():
 
     app = App()
     app.mainloop()
+
 
 if __name__ == "__main__":
     main()

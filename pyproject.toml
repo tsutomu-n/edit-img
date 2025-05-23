@@ -11,6 +11,9 @@ dependencies = [
     "TkEasyGUI>=0.2.20,<0.3.0",
     "emoji>=2.0.0,<3.0.0",
     "customtkinter>=5.2.2",
+    "flake8>=7.2.0",
+    "pytest>=8.3.5",
+    "black>=25.1.0",
 ]
 
 [project.scripts]
@@ -26,3 +29,10 @@ py-modules = ["resize_core", "resize_images", "resize_images_gui"]
 
 [tool.setuptools.package-data]
 "*" = ["*.md", "*.json"]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+per-file-ignores = [
+    "__init__.py:F401",
+]
