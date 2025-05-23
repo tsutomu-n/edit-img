@@ -1222,4 +1222,4 @@ def load_progress(input_file="progress.json"):
 
 
 # 初期ロギング設定
-setup_logging()
+# setup_logging()

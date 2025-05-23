@@ -18,6 +18,17 @@ import signal
 from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
+from PIL import Image, UnidentifiedImageError
+from resize_core import (
+    resize_and_compress_image,
+    find_image_files,
+    create_directory_with_permissions,
+    get_directory_size,
+    calculate_reduction_rate,
+    format_file_size,
+    # generate_html_report, # HTMLレポート生成機能はコアに存在しないためコメントアウト
+    normalize_long_path
+)
 from loguru import logger
 
 # コア機能をインポート
@@ -109,15 +120,26 @@ def setup_logger(verbose=False):
     )
     
     # ファイル出力用のロガー設定
+    # ログファイルの出力先ディレクトリを指定
+    log_dir = Path("/home/tn/projects/tools/edit-img/log")
+    # ディレクトリが存在しない場合は作成
+    log_dir.mkdir(parents=True, exist_ok=True)
+
     from datetime import datetime
-    log_filename = f"process_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.log"
+    # ログファイル名を生成
+    log_file_name_only = f"process_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.log"
+    # 完全なログファイルパスを構築
+    full_log_path = log_dir / log_file_name_only
+
     logger.add(
-        log_filename,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
-        level="DEBUG"  # ファイルには常に詳細情報を記録
+        full_log_path, # 完全なパスを使用
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {module}:{function}:{line} - {message}",
+        level="DEBUG",  # ファイルログは常にDEBUGレベルで出力
+        rotation="10 MB",  # 10MBでローテーション
+        retention="7 days",  # 7日間保持
+        encoding="utf-8"
     )
-    
-    return log_filename
+    return str(full_log_path) # 文字列として返す
 
 def get_directory_size(path):
     """ディレクトリの合計サイズを取得"""
@@ -391,7 +413,7 @@ def main():
         DEBUG_MODE = args.debug
         
         # ロガー設定
-        log_filename = setup_logger(args.verbose)
+        log_filename = setup_logger(verbose=args.debug)
         logger.info(f"CLIモードで起動しました。ログファイル: {log_filename}")
         logger.info(f"Pythonバージョン: {sys.version}")
         logger.info(f"OS情報: {os.name} - {sys.platform}")
@@ -404,7 +426,7 @@ def main():
         
         # 入力値のバリデーション
         source_dir = Path(args.source)
-        dest_dir = Path(args.destination)
+        dest_dir = Path(args.dest)
         
         if not source_dir.exists():
             logger.error(f"入力ディレクトリが存在しません: {source_dir}")
@@ -445,12 +467,33 @@ def main():
     logger.info(f"{'【ドライラン】' if args.dry_run else ''}処理を開始します。")
     logger.info(f"処理対象画像ファイル数: {len(image_files)}")
     logger.info(f"ソースディレクトリ: {args.source}")
-    logger.info(f"出力先ディレクトリ: {args.destination}")
+    logger.info(f"出力先ディレクトリ: {args.dest}")
     logger.info(f"リサイズ幅: {args.width}px")
     logger.info(f"JPEG品質: {args.quality}%")
-    print(f"処理前の総合サイズ: {format_file_size(source_size)}")
-    print("-" * 80)
-    
+
+    # 処理開始前にソースディレクトリの総サイズを取得（ドライラン時のみ）
+    if args.dry_run:
+        total_size_before_display = get_directory_size(args.source)
+        logger.info(f"処理前の総合サイズ: {format_file_size(total_size_before_display)}")
+
+    # 出力ディレクトリを作成 (存在しない場合)
+    # create_output_directory(args.dest, args.dry_run)
+    success, created_path = create_directory_with_permissions(args.dest)
+    if not success:
+        logger.error(f"出力ディレクトリの作成に失敗しました: {created_path}")
+        return 1
+    elif created_path:
+        logger.info(f"出力ディレクトリを作成しました: {created_path}")
+
+    image_files = find_image_files(args.source)
+    if not image_files:
+        logger.warning("処理対象の画像ファイルが見つかりませんでした。")
+        return 1
+
+    # 処理時間の計測開始
+    start_time = time.time()
+
+    # 初期化
     processed_count = 0
     skipped_count = 0
     error_count = 0
@@ -467,7 +510,7 @@ def main():
                 # 処理途中の場合は進捗を保存
                 if not args.dry_run:
                     remaining = image_files[idx:]
-                    save_progress(processed_files + image_files[:idx-1], remaining)
+                    save_progress([], remaining)
                 break
                 
             # 元のファイルサイズを取得
@@ -478,7 +521,7 @@ def main():
                 file_size_before = 0
             
             # 出力先パスを取得
-            dest_path = get_destination_path(source_path, args.source, args.destination)
+            dest_path = get_destination_path(source_path, args.source, args.dest)
             
             # 処理状況を表示
             person_name = source_path.parent.name
@@ -513,7 +556,6 @@ def main():
             if original_size and new_size:
                 tqdm.write(f"  ✓ サイズ変更: {original_size[0]}x{original_size[1]} → {new_size[0]}x{new_size[1]}")
                 processed_count += 1
-                processed_files.append(source_path)
                 result_item["status"] = "success"
                 
                 # ファイルサイズ情報の表示
@@ -572,17 +614,17 @@ def main():
     
     if not args.dry_run:
         # ディレクトリサイズ情報
-        dest_size = get_directory_size(args.destination)
+        dest_size = get_directory_size(args.dest)
         print(f"処理後の総合サイズ: {format_file_size(dest_size)}")
-        overall_reduction = calculate_reduction_rate(args.source, args.destination)
+        overall_reduction = calculate_reduction_rate(args.source, args.dest)
         print(f"全体の削減率: {overall_reduction:.1f}%")
     
     print(f"処理時間: {elapsed_time:.2f}秒")
     
-    # HTMLレポート生成
-    if args.report and not args.dry_run and processed_count > 0:
-        report_file = generate_html_report(results, args.source, args.destination)
-        print(f"レポートを生成しました: {report_file}")
+    # HTMLレポート生成 (機能が存在しないためコメントアウト)
+    # report_file = generate_html_report(results, args.source, args.dest)
+    # if report_file:
+    #     logger.info(f"HTMLレポートを生成しました: {report_file}")
     
     if args.dry_run:
         print("\n実際に処理を実行するには、--dry-runオプションを外して再実行してください。")
