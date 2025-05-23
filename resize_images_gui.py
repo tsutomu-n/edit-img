@@ -50,13 +50,34 @@ class App(ctk.CTk):
         self.button_font = ctk.CTkFont(**get_button_font())
         self.heading_font = ctk.CTkFont(**get_heading_font())
 
+        # 先にログとプログレスバーのフレームを作成
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.main_frame.grid_rowconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(1, weight=0)
         self.main_frame.grid_columnconfigure(0, weight=1)
+        
+        # ログとプログレスバーを先に初期化
+        self.log_progress_frame = ctk.CTkFrame(self.main_frame, corner_radius=6)
+        self.log_progress_frame.grid(row=1, column=0, sticky="ew", pady=(5, 0))
+        self.log_progress_frame.grid_columnconfigure(0, weight=1)
 
+        self.log_textbox = ctk.CTkTextbox(
+            self.log_progress_frame,
+            height=120,
+            corner_radius=6,
+            wrap="word",
+            state="disabled",
+            font=self.normal_font,
+        )
+        self.log_textbox.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        self.progress_bar = ctk.CTkProgressBar(self.log_progress_frame, corner_radius=6)
+        self.progress_bar.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 5))
+        self.progress_bar.set(0)
+
+        # タブを作成
         self.tab_view = ctk.CTkTabview(self.main_frame, corner_radius=8)
         self.tab_view.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
 
@@ -82,32 +103,27 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+        # 必要な変数を初期化
         self.resize_value_unit_label = None
         self.resize_quality_text_label = None
         self.resize_quality_slider = None
         self.resize_quality_value_label = None
-
+        self.resize_start_button = None
+        self.resize_cancel_button = None
+        
+        # ログ初期化完了後にタブの中身を作成
         self.create_tab_content_frames()
-
-        self.log_progress_frame = ctk.CTkFrame(self.main_frame, corner_radius=6)
-        self.log_progress_frame.grid(row=1, column=0, sticky="ew", pady=(5, 0))
-
-        self.log_progress_frame.grid_columnconfigure(0, weight=1)
-
-        self.log_textbox = ctk.CTkTextbox(
-            self.log_progress_frame,
-            height=120,
-            corner_radius=6,
-            wrap="word",
-            state="disabled",
-            font=self.normal_font,
-        )
-        self.log_textbox.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-
-        self.progress_bar = ctk.CTkProgressBar(self.log_progress_frame, corner_radius=6)
-        self.progress_bar.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 5))
-        self.progress_bar.set(0)
-
+        
+        # 初期化完了後に初期状態を設定
+        self.add_log_message("アプリケーションを初期化しました")
+        
+        # リサイズタブの初期値を設定
+        if hasattr(self, "resize_mode_var"):
+            self.on_resize_mode_change(self.resize_mode_var.get())
+        if hasattr(self, "resize_output_format_var"):
+            self.on_output_format_change(self.resize_output_format_var.get())
+        
+        # ウィンドウを中央に配置
         self.center_window()
 
     def _select_file(
@@ -134,7 +150,9 @@ class App(ctk.CTk):
             self.add_log_message(f"フォルダ選択: {dirpath}")
 
     def on_output_format_change(self, selected_format):
-        self.add_log_message(f"出力フォーマット変更: {selected_format}")
+        # ログメッセージは初期化完了後のみ表示
+        if hasattr(self, "log_textbox") and self.log_textbox is not None:
+            self.add_log_message(f"出力フォーマット変更: {selected_format}")
         show_quality = selected_format in ["JPEG", "WEBP"]
 
         if self.resize_quality_text_label:
@@ -161,7 +179,9 @@ class App(ctk.CTk):
             self.resize_quality_value_label.configure(text=f"{int(value)}")
 
     def on_resize_mode_change(self, selected_mode):
-        self.add_log_message(f"リサイズモード変更: {selected_mode}")
+        # ログメッセージは初期化完了後のみ表示
+        if hasattr(self, "log_textbox") and self.log_textbox is not None:
+            self.add_log_message(f"リサイズモード変更: {selected_mode}")
         if hasattr(self, "resize_value_unit_label") and self.resize_value_unit_label:
             if selected_mode == "パーセント":
                 self.resize_value_unit_label.configure(text="%")
@@ -369,9 +389,7 @@ class App(ctk.CTk):
         self.resize_cancel_button.grid(row=0, column=2, padx=5, pady=5)
         current_row += 1
 
-        # リサイズタブのウィジェット作成後、初期値でUIを更新
-        self.on_resize_mode_change(self.resize_mode_var.get())
-        self.on_output_format_change(self.resize_output_format_var.get())
+        # 全ての初期化が完了した後に初期値を設定する
 
         self.compress_tab_content = ctk.CTkFrame(
             self.tab_compress, corner_radius=0, fg_color="transparent"
@@ -394,10 +412,18 @@ class App(ctk.CTk):
         ).pack(pady=20)
 
     def add_log_message(self, message):
-        self.log_textbox.configure(state="normal")
-        self.log_textbox.insert("end", message + "\n")
-        self.log_textbox.configure(state="disabled")
-        self.log_textbox.see("end")
+        # log_textboxがまだ初期化されていない場合は何もしない
+        if not hasattr(self, "log_textbox") or self.log_textbox is None:
+            print(f"ログメッセージ（表示不可）: {message}")
+            return
+            
+        try:
+            self.log_textbox.configure(state="normal")
+            self.log_textbox.insert("end", f"{message}\n")
+            self.log_textbox.configure(state="disabled")
+            self.log_textbox.see("end")
+        except Exception as e:
+            print(f"ログ表示エラー: {e} - メッセージ: {message}")
 
     def update_progress(self, value):
         self.progress_bar.set(value)
