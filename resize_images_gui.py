@@ -1,6 +1,8 @@
 import customtkinter as ctk
 from tkinter import filedialog, TclError
 from pathlib import Path
+import threading
+import time
 
 # 日本語フォント設定モジュールをインポート
 try:
@@ -22,12 +24,13 @@ try:
         resize_and_compress_image,
         get_destination_path,
         sanitize_filename,
+        format_file_size,
     )
 except ImportError:
 
     def resize_and_compress_image(*args, **kwargs):
         print("ダミー: resize_and_compress_image")
-        return True, True, "ダミー処理成功"
+        return True, {'original_size': 100000, 'new_size': 50000, 'compression_ratio': 50.0}, "ダミー処理成功"
 
     def get_destination_path(source_path, source_dir, dest_dir):
         print("ダミー: get_destination_path")
@@ -36,6 +39,13 @@ except ImportError:
     def sanitize_filename(filename):
         print("ダミー: sanitize_filename")
         return filename
+        
+    def format_file_size(size_in_bytes):
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_in_bytes < 1024.0 or unit == 'GB':
+                break
+            size_in_bytes /= 1024.0
+        return f"{size_in_bytes:.1f} {unit}"
 
 
 class App(ctk.CTk):
@@ -432,8 +442,28 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"ログ表示エラー: {e} - メッセージ: {message}")
 
-    def update_progress(self, value):
-        self.progress_bar.set(value)
+    def update_progress(self, value, pulse=False):
+        """
+        進捗バーを更新する
+        
+        Args:
+            value: 0.0-1.0の間の進捗値
+            pulse: Trueの場合、パルスモードを使用（処理中アニメーション）
+        """
+        if pulse:
+            # パルスモードの場合、少し値を変動させて動きを演出
+            current = self.progress_bar.get()
+            # 0.45-0.55の間で値を変動させる
+            if current < 0.45 or current > 0.55:
+                self.progress_bar.set(0.5)
+            else:
+                # 少しずつ値を変更して動きを作る
+                delta = 0.01
+                new_value = current + delta if current < 0.55 else current - delta
+                self.progress_bar.set(new_value)
+        else:
+            # 通常モード
+            self.progress_bar.set(value)
 
     def center_window(self):
         """Windows環境でも正しく動作するよう修正した中央配置メソッド"""
@@ -473,89 +503,60 @@ class App(ctk.CTk):
                 "エラー: 入力ファイルが選択されていません。ファイルを選択してください。"
             )
             self.finish_resize_process(success=False)
-            return
-        if not Path(input_file_str).is_file():
-            self.add_log_message(
-                f"エラー: 入力ファイルが見つかりません: {input_file_str}\nファイルが存在するか確認してください。"
-            )
-            self.finish_resize_process(success=False)
-            return
-        if not output_dir_str:
-            self.add_log_message(
-                "エラー: 出力先フォルダが選択されていません。出力先フォルダを指定してください。"
-            )
-            self.finish_resize_process(success=False)
-            return
-        if not Path(output_dir_str).is_dir():
-            self.add_log_message(
-                f"エラー: 出力先フォルダが見つからないか、フォルダではありません: {output_dir_str}\n有効なフォルダを指定してください。"
-            )
-            self.finish_resize_process(success=False)
-            return
 
-        try:
-            resize_value = int(resize_value_str)
-            if resize_value <= 0:
-                raise ValueError("リサイズ値は正の整数である必要があります。")
-        except ValueError:
-            self.add_log_message(
-                f"エラー: リサイズ値が無効です: {resize_value_str}\n正の整数値を入力してください。"
-            )
-            self.finish_resize_process(success=False)
-            return
-
-        source_path = Path(input_file_str)
-        dest_dir = Path(output_dir_str)
-
-        mode_map = {"パーセント": "percentage", "幅指定": "width", "高さ指定": "height"}
-        core_resize_mode = mode_map.get(resize_mode_gui, "percentage")
-
-        format_map = {
-            "元のフォーマットを維持": "original",
-            "PNG": "png",
+        core_output_format = {
             "JPEG": "jpeg",
-            "WEBP": "webp",
-        }
-        core_output_format = format_map.get(output_format_gui, "original")
+            "PNG": "png",
+            "WebP": "webp",
+            "入力と同じ": "same",
+        }.get(output_format, "same")
 
+        # 出力ファイルパスの生成
         base_name = source_path.stem
-        if core_output_format != "original":
-            ext = f".{core_output_format.lower()}"
-        else:
-            ext = source_path.suffix
+        ext = source_path.suffix
 
         sanitized_stem = sanitize_filename(base_name)
         output_filename = sanitized_stem + ext
         dest_path = dest_dir / output_filename
 
-        self.add_log_message(f"入力: {source_path}")
-        self.add_log_message(f"出力先: {dest_path}")
-        self.add_log_message(
-            f"モード: {core_resize_mode}, 値: {resize_value}, アスペクト比維持: {keep_aspect_ratio}"
-        )
         self.add_log_message(
             f"フォーマット: {core_output_format}, 品質: {quality if core_output_format in ['jpeg', 'webp'] else 'N/A'}"
         )
 
         self.update_progress(0.3)
+        self.processing_thread = None
+        self.cancel_requested = False
 
+        # 処理をスレッドで実行
         try:
             self.add_log_message("画像処理を実行中...")
-            self.after(
-                2000,
-                lambda: self.finish_resize_process(
-                    success=True, message="ダミー処理成功！"
+            self.processing_thread = threading.Thread(
+                target=self._process_image_thread,
+                args=(
+                    source_path,
+                    dest_path,
+                    core_resize_mode,
+                    resize_value,
+                    keep_aspect_ratio,
+                    core_output_format,
+                    quality,
                 ),
+                daemon=True
             )
+            self.processing_thread.start()
+            
+            # 進捗状況の更新を開始
+            self.after(100, self._check_thread_status)
         except Exception as e:
-            self.add_log_message(f"画像処理中に予期せぬエラーが発生しました: {e}")
+            self.add_log_message(f"画像処理の開始中に予期せぬエラーが発生しました: {e}")
             self.finish_resize_process(success=False, message=str(e))
 
     def cancel_resize_process(self):
-        self.add_log_message("リサイズ処理を中断しました。")
-        self.finish_resize_process(
-            success=False, message="ユーザーにより中断されました。"
-        )
+        self.add_log_message("リサイズ処理を中断しています...")
+        self.cancel_requested = True
+        
+        # スレッドは自然に終了するのを待つ
+        # 本格的な実装では、もっと洗練された中断機構が必要
 
     def finish_resize_process(self, success=True, message="処理完了"):
         if success:
@@ -569,6 +570,66 @@ class App(ctk.CTk):
             self.resize_start_button.configure(state="normal")
         if self.resize_cancel_button:
             self.resize_cancel_button.configure(state="disabled")
+            
+        # 処理関連の状態をリセット
+        self.processing_thread = None
+        self.cancel_requested = False
+        
+    def _process_image_thread(self, source_path, dest_path, resize_mode, resize_value, keep_aspect_ratio, output_format, quality):
+        """スレッドで実行される画像処理関数"""
+        try:
+            # キャンセル要求のチェック
+            if self.cancel_requested:
+                return
+                
+            # 実際の画像処理を実行
+            success, stats, message = resize_and_compress_image(
+                source_path=str(source_path),
+                destination_path=str(dest_path),
+                resize_mode=resize_mode,
+                resize_value=resize_value,
+                maintain_aspect_ratio=keep_aspect_ratio,
+                output_format=output_format,
+                quality=quality
+            )
+            
+            # キャンセル要求のチェック
+            if self.cancel_requested:
+                return
+                
+            # 処理結果をメインスレッドに通知
+            if success and stats:
+                original_size = stats.get('original_size', 0)
+                new_size = stats.get('new_size', 0)
+                compression_ratio = stats.get('compression_ratio', 0)
+                result_message = f"処理完了 - 元サイズ: {format_file_size(original_size)}, 新サイズ: {format_file_size(new_size)}, 圧縮率: {compression_ratio:.1f}%"
+            else:
+                result_message = message or "処理が完了しましたが、詳細情報はありません"
+                
+            # UIスレッドでの処理完了通知
+            self.after(0, lambda: self.finish_resize_process(success=success, message=result_message))
+            
+        except Exception as e:
+            # エラー発生時の処理
+            error_message = f"画像処理中にエラーが発生しました: {e}"
+            self.after(0, lambda: self.finish_resize_process(success=False, message=error_message))
+            
+    def _check_thread_status(self):
+        """処理スレッドの状態をチェックし、進捗バーを更新する"""
+        if self.processing_thread and self.processing_thread.is_alive():
+            # スレッドがまだ実行中の場合、進捗を更新して再度チェックをスケジュール
+            if self.cancel_requested:
+                self.update_progress(0.5, pulse=True)  # パルスモードで進捗表示
+            else:
+                # ここでは簡易的な進捗表示。実際には処理の進行状況に応じて値を設定すべき
+                current_progress = min(0.9, self.progress_var.get() + 0.1)
+                self.update_progress(current_progress)
+                
+            # 100ms後に再度チェック
+            self.after(100, self._check_thread_status)
+        elif self.cancel_requested:
+            # キャンセルが要求され、スレッドが終了している場合
+            self.after(0, lambda: self.finish_resize_process(success=False, message="ユーザーにより中断されました"))
 
 
 def main():
